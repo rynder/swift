@@ -151,7 +151,7 @@ private:
     decltype(m_decls)::const_iterator end() { return m_decls.end(); }
   };
 
-  bool lookupQualified(ModuleDecl *entry, Identifier name, unsigned options,
+  bool lookupQualified(ModuleDecl *entry, Identifier name, NLOptions options,
                        LazyResolver *typeResolver, ValueDecls &decls) {
     if (!entry)
       return false;
@@ -209,7 +209,7 @@ public:
     return DeclsLookupSource(source._module, decl);
   }
 
-  void lookupQualified(Identifier name, unsigned options,
+  void lookupQualified(Identifier name, NLOptions options,
                        LazyResolver *typeResolver, ValueDecls &result) {
     if (_type == LookupKind::Crawler) {
       ASTContext *ast_ctx = _crawler._ast;
@@ -576,7 +576,7 @@ static bool FindFirstNamedDeclWithKind(
           name_ident, ast->getIdentifier(priv_decl_id.getValue().c_str()),
           decls);
     else
-      result._module.lookupQualified(name_ident, 0, NULL, decls);
+      result._module.lookupQualified(name_ident, NLOptions(), NULL, decls);
     if (!decls.empty()) {
       bool check_type_aliases = false;
       // Look for an exact match first
@@ -1058,6 +1058,15 @@ static void VisitNodeConstructor(
           case TypeKind::Function: {
             const AnyFunctionType *identifier_func =
                 identifier_type->getAs<AnyFunctionType>();
+
+            // inits are typed as (Foo.Type) -> (args...) -> Foo, but don't
+            // assert that in case we're dealing with broken code.
+            if (identifier_func->getInput()->is<AnyMetatypeType>() &&
+                identifier_func->getResult()->is<AnyFunctionType>()) {
+              identifier_func =
+                  identifier_func->getResult()->getAs<AnyFunctionType>();
+            }
+
             const AnyFunctionType *type_func =
                 type_result._types.front()->getAs<AnyFunctionType>();
             if (CanType(identifier_func->getResult()
@@ -2373,6 +2382,23 @@ VisitNode(ASTContext *ast, std::vector<Demangle::NodePointer> &nodes,
     visitNodeImpl(ast, nodes, nodes.back(), result, genericContext);
 
   nodes.pop_back();
+}
+
+Decl *ide::getDeclFromUSR(ASTContext &context, StringRef USR,
+                          std::string &error) {
+  if (!USR.startswith("s:")) {
+    error = "not a Swift USR";
+    return nullptr;
+  }
+
+  std::string mangledName(USR);
+  // Convert to a symbol name by replacing the USR prefix.
+  // This relies on USR generation being very close to symbol mangling; if we
+  // need to support entities with customized USRs (e.g. extensions), we will
+  // need to do something smarter here.
+  mangledName.replace(0, 2, "_T");
+
+  return getDeclFromMangledSymbolName(context, mangledName, error);
 }
 
 Decl *ide::getDeclFromMangledSymbolName(ASTContext &context,

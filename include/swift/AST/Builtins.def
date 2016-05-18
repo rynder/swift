@@ -73,6 +73,7 @@ BUILTIN_BINARY_OPERATION(FSub,    "fsub",     "n", FloatOrVector)
 BUILTIN_BINARY_OPERATION(UDiv,    "udiv",     "n", IntegerOrVector)
 BUILTIN_BINARY_OPERATION(ExactUDiv, "udiv_exact", "n", IntegerOrVector)
 BUILTIN_BINARY_OPERATION(URem,    "urem",     "n", Integer)
+BUILTIN_BINARY_OPERATION(FRem,    "frem",     "n", FloatOrVector)
 BUILTIN_BINARY_OPERATION(Xor,     "xor",      "n", IntegerOrVector)
 #undef BUILTIN_BINARY_OPERATION
 
@@ -363,6 +364,9 @@ BUILTIN_MISC_OPERATION(DeallocRaw, "deallocRaw", "", Special)
 /// Fence has type () -> ().
 BUILTIN_MISC_OPERATION(Fence, "fence", "", None)
 
+/// onFastPath has type () -> ().
+BUILTIN_MISC_OPERATION(OnFastPath, "onFastPath", "n", None)
+
 /// CmpXChg has type (Builtin.RawPointer, T, T) -> (T, Bool).
 BUILTIN_MISC_OPERATION(CmpXChg, "cmpxchg", "", Special)
 
@@ -433,6 +437,12 @@ BUILTIN_MISC_OPERATION(DestroyArray, "destroyArray", "", Special)
 BUILTIN_MISC_OPERATION(CopyArray, "copyArray", "", Special)
 BUILTIN_MISC_OPERATION(TakeArrayFrontToBack, "takeArrayFrontToBack", "", Special)
 BUILTIN_MISC_OPERATION(TakeArrayBackToFront, "takeArrayBackToFront", "", Special)
+
+// unsafeGuaranteed has type <T: AnyObject> T -> (T, Builtin.Int8)
+BUILTIN_MISC_OPERATION(UnsafeGuaranteed, "unsafeGuaranteed", "", Special)
+
+// unsafeGuaranteedEnd has type (Builtin.Int8) -> ()
+BUILTIN_MISC_OPERATION(UnsafeGuaranteedEnd, "unsafeGuaranteedEnd", "", Special)
 
 #undef BUILTIN_MISC_OPERATION
 

@@ -116,6 +116,14 @@ source code, tests, and commit messages. See also the `LLVM lexicon`_.
     version information and may try to load older module files, resulting in
     crashes in ``clang::ASTReader``.
 
+  NFC
+    "No functionality change." Written in commit messages that are intended to
+    have no change on the compiler or library's behavior, though for some this
+    refers to having the *same* implementation and for others merely an
+    *equivalent* one.  "NFC" is typically used to explain why a patch has no
+    included testcase, since the Swift project requires testcases for all
+    patches that change functionality.
+
   open existential
     An `existential` value with its dynamic type pulled out, so that the 
     compiler can do something with it.
@@ -131,6 +139,16 @@ source code, tests, and commit messages. See also the `LLVM lexicon`_.
     The file currently being compiled, as opposed to the other files that are
     only needed for context. See also
     `Whole-Module Optimization <WMO (whole-module optimization)>`.
+
+  QoI
+    "Quality of implementation." The term is meant to describe not how
+    well-engineered a particular implementation is, but how much value it
+    provides to users beyond a sort of minimum expectation. Good diagnostics
+    are a matter of QoI, as is good unoptimized performance. For example, a
+    comment like "FIXME: QoI could be improved here" is suggesting that there's
+    some sort of non-mandatory work that could be done that would improve the
+    behavior of the compiler--it is not just a general statement that the code
+    needs to be improved.
 
   Radar
     `Apple's bug-tracking system`__, or an issue reported on that system.
@@ -174,6 +192,12 @@ source code, tests, and commit messages. See also the `LLVM lexicon`_.
   type metadata
     The runtime representation of a type, and everything you can do with it.
     Like a ``Class`` in Objective-C, but for any type.
+
+  USR
+    A Unified Symbol Resolution (USR) is a string that identifies a particular
+    entity (function, class, variable, etc.) within a program. USRs can be
+    compared across translation units to determine, e.g., when references in
+    one translation refer to an entity defined in another translation unit.
 
   value witness table
     A runtime structure that describes how to do basic operations on an unknown

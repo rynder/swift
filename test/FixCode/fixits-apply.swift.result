@@ -11,8 +11,8 @@ b as! Derived
 b 
 
 var opti : Int?
-// Don't add bang.
-var i : Int = opti
+// Add bang.
+var i : Int = opti!
 // But remove unnecessary bang.
 var i2 : Int = i
 
@@ -31,14 +31,28 @@ func supported() -> MyMask {
   return MyMask.Bingo
 }
 
-func foo() -> Int {
-  do {
-  } catch let err {
-    goo(err)
+func goo(e : ErrorProtocol) {
+    var e = e
+}
+func goo2(e: ErrorProtocol) { var e = e }
+func goo3(e: Int) { var e = e; e = 3 }
+protocol A {
+  func bar(s: Int)
+}
+extension A {
+  func bar(s: Int) {
+    var s = s
+    s += 5
   }
 }
 
-func goo(e : ErrorProtocol) {}
+func baz(x: Int) {
+  var x = x
+  x += 10
+}
+func foo(y: String, x: inout Int) {
+  
+}
 
 struct Test1 : OptionSet {
   init(rawValue: Int) {}
@@ -51,3 +65,5 @@ func ftest1() {
   // Don't replace the variable name with '_'
   let myvar = 0
 }
+
+func ftest2(x: (Int) -> Int) {}

@@ -9,13 +9,6 @@
 import Swift
 import StdlibUnittest
 
-// Also import modules which are used by StdlibUnittest internally. This
-// workaround is needed to link all required libraries in case we compile
-// StdlibUnittest with -sil-serialize-all.
-import SwiftPrivate
-#if _runtime(_ObjC)
-import ObjectiveC
-#endif
 
 import Foundation
 import CoreGraphics
@@ -68,10 +61,6 @@ struct BridgedValueType : _ObjectiveCBridgeable {
     self.value = value
   }
 
-  static func _getObjectiveCType() -> Any.Type {
-    return ClassA.self
-  }
-
   func _bridgeToObjectiveC() -> ClassA {
     return ClassA(value: value)
   }
@@ -81,7 +70,7 @@ struct BridgedValueType : _ObjectiveCBridgeable {
   }
 
   static func _forceBridgeFromObjectiveC(
-    x: ClassA,
+    _ x: ClassA,
     result: inout BridgedValueType?
   ) {
     assert(x.value % 2 == 0, "not bridged to Objective-C")
@@ -89,7 +78,7 @@ struct BridgedValueType : _ObjectiveCBridgeable {
   }
 
   static func _conditionallyBridgeFromObjectiveC(
-    x: ClassA,
+    _ x: ClassA,
     result: inout BridgedValueType?
   ) -> Bool {
     if x.value % 2 == 0 {
@@ -99,6 +88,13 @@ struct BridgedValueType : _ObjectiveCBridgeable {
 
     result = nil
     return false
+  }
+
+  static func _unconditionallyBridgeFromObjectiveC(_ source: ClassA?)
+      -> BridgedValueType {
+    var result: BridgedValueType? = nil
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
   }
 
   var value: Int
@@ -117,10 +113,6 @@ struct BridgedLargeValueType : _ObjectiveCBridgeable {
     value7 = value
   }
 
-  static func _getObjectiveCType() -> Any.Type {
-    return ClassA.self
-  }
-
   func _bridgeToObjectiveC() -> ClassA {
     assert(value == value0)
     return ClassA(value: value0)
@@ -131,7 +123,7 @@ struct BridgedLargeValueType : _ObjectiveCBridgeable {
   }
 
   static func _forceBridgeFromObjectiveC(
-    x: ClassA,
+    _ x: ClassA,
     result: inout BridgedLargeValueType?
   ) {
     assert(x.value % 2 == 0, "not bridged to Objective-C")
@@ -139,7 +131,7 @@ struct BridgedLargeValueType : _ObjectiveCBridgeable {
   }
 
   static func _conditionallyBridgeFromObjectiveC(
-    x: ClassA,
+    _ x: ClassA,
     result: inout BridgedLargeValueType?
   ) -> Bool {
     if x.value % 2 == 0 {
@@ -149,6 +141,13 @@ struct BridgedLargeValueType : _ObjectiveCBridgeable {
 
     result = nil
     return false
+  }
+
+  static func _unconditionallyBridgeFromObjectiveC(_ source: ClassA?)
+      -> BridgedLargeValueType {
+    var result: BridgedLargeValueType? = nil
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
   }
 
   var value: Int {
@@ -169,16 +168,12 @@ struct ConditionallyBridgedValueType<T> : _ObjectiveCBridgeable {
     self.value = value
   }
 
-  static func _getObjectiveCType() -> Any.Type {
-    return ClassA.self
-  }
-
   func _bridgeToObjectiveC() -> ClassA {
     return ClassA(value: value)
   }
 
   static func _forceBridgeFromObjectiveC(
-    x: ClassA,
+    _ x: ClassA,
     result: inout ConditionallyBridgedValueType?
   ) {
     assert(x.value % 2 == 0, "not bridged from Objective-C")
@@ -186,7 +181,7 @@ struct ConditionallyBridgedValueType<T> : _ObjectiveCBridgeable {
   }
 
   static func _conditionallyBridgeFromObjectiveC(
-    x: ClassA,
+    _ x: ClassA,
     result: inout ConditionallyBridgedValueType?
   ) -> Bool {
     if x.value % 2 == 0 {
@@ -196,6 +191,13 @@ struct ConditionallyBridgedValueType<T> : _ObjectiveCBridgeable {
 
     result = nil
     return false
+  }
+
+  static func _unconditionallyBridgeFromObjectiveC(_ source: ClassA?)
+      -> ConditionallyBridgedValueType {
+    var result: ConditionallyBridgedValueType? = nil
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
   }
 
   static func _isBridgedToObjectiveC() -> Bool {
@@ -212,7 +214,7 @@ class BridgedVerbatimRefType {
 }
 
 func withSwiftObjectCanary<T>(
-  createValue: () -> T,
+  _ createValue: () -> T,
   _ check: (T) -> Void,
   file: String = #file, line: UInt = #line
 ) {
@@ -229,7 +231,7 @@ func withSwiftObjectCanary<T>(
 
 var Runtime = TestSuite("Runtime")
 
-func _isClassOrObjCExistential_Opaque<T>(x: T.Type) -> Bool {
+func _isClassOrObjCExistential_Opaque<T>(_ x: T.Type) -> Bool {
   return _isClassOrObjCExistential(_opaqueIdentity(x))
 }
 
@@ -431,10 +433,10 @@ Runtime.test("Generic class ObjC runtime names") {
   expectEqual("_TtGC1a12GenericClassMVS_11PlainStruct_",
               NSStringFromClass(GenericClass<PlainStruct.Type>.self))
   expectEqual("_TtGC1a12GenericClassFMVS_11PlainStructS1__",
-              NSStringFromClass(GenericClass<PlainStruct.Type -> PlainStruct>.self))
+              NSStringFromClass(GenericClass<(PlainStruct.Type) -> PlainStruct>.self))
 
   expectEqual("_TtGC1a12GenericClassFzMVS_11PlainStructS1__",
-              NSStringFromClass(GenericClass<PlainStruct.Type throws -> PlainStruct>.self))
+              NSStringFromClass(GenericClass<(PlainStruct.Type) throws -> PlainStruct>.self))
   expectEqual("_TtGC1a12GenericClassFTVS_11PlainStructROS_9PlainEnum_Si_",
               NSStringFromClass(GenericClass<(PlainStruct, inout PlainEnum) -> Int>.self))
 
@@ -555,22 +557,85 @@ RuntimeFoundationWrappers.test(
   expectEqual(0, nsStringCanaryCount)
 }
 
-RuntimeFoundationWrappers.test("_stdlib_NSStringNFDHashValue/NoLeak") {
+RuntimeFoundationWrappers.test(
+  "_stdlib_compareNSStringDeterministicUnicodeCollationPtr/NoLeak"
+) {
   nsStringCanaryCount = 0
   autoreleasepool {
     let a = NSStringCanary()
-    expectEqual(1, nsStringCanaryCount)
-    _stdlib_NSStringNFDHashValue(a)
+    let b = NSStringCanary()
+    expectEqual(2, nsStringCanaryCount)
+    let ptrA = unsafeBitCast(a, to: OpaquePointer.self)
+    let ptrB = unsafeBitCast(b, to: OpaquePointer.self)
+    _stdlib_compareNSStringDeterministicUnicodeCollationPointer(ptrA, ptrB)
   }
   expectEqual(0, nsStringCanaryCount)
 }
 
-RuntimeFoundationWrappers.test("_stdlib_NSStringASCIIHashValue/NoLeak") {
+RuntimeFoundationWrappers.test("_stdlib_NSStringHashValue/NoLeak") {
   nsStringCanaryCount = 0
   autoreleasepool {
     let a = NSStringCanary()
     expectEqual(1, nsStringCanaryCount)
-    _stdlib_NSStringASCIIHashValue(a)
+    _stdlib_NSStringHashValue(a, true)
+  }
+  expectEqual(0, nsStringCanaryCount)
+}
+
+RuntimeFoundationWrappers.test("_stdlib_NSStringHashValueNonASCII/NoLeak") {
+  nsStringCanaryCount = 0
+  autoreleasepool {
+    let a = NSStringCanary()
+    expectEqual(1, nsStringCanaryCount)
+    _stdlib_NSStringHashValue(a, false)
+  }
+  expectEqual(0, nsStringCanaryCount)
+}
+
+RuntimeFoundationWrappers.test("_stdlib_NSStringHashValuePointer/NoLeak") {
+  nsStringCanaryCount = 0
+  autoreleasepool {
+    let a = NSStringCanary()
+    expectEqual(1, nsStringCanaryCount)
+    let ptrA = unsafeBitCast(a, to: OpaquePointer.self)
+    _stdlib_NSStringHashValuePointer(ptrA, true)
+  }
+  expectEqual(0, nsStringCanaryCount)
+}
+
+RuntimeFoundationWrappers.test("_stdlib_NSStringHashValuePointerNonASCII/NoLeak") {
+  nsStringCanaryCount = 0
+  autoreleasepool {
+    let a = NSStringCanary()
+    expectEqual(1, nsStringCanaryCount)
+    let ptrA = unsafeBitCast(a, to: OpaquePointer.self)
+    _stdlib_NSStringHashValuePointer(ptrA, false)
+  }
+  expectEqual(0, nsStringCanaryCount)
+}
+
+RuntimeFoundationWrappers.test("_stdlib_NSStringHasPrefixNFDPointer/NoLeak") {
+  nsStringCanaryCount = 0
+  autoreleasepool {
+    let a = NSStringCanary()
+    let b = NSStringCanary()
+    expectEqual(2, nsStringCanaryCount)
+    let ptrA = unsafeBitCast(a, to: OpaquePointer.self)
+    let ptrB = unsafeBitCast(b, to: OpaquePointer.self)
+    _stdlib_NSStringHasPrefixNFDPointer(ptrA, ptrB)
+  }
+  expectEqual(0, nsStringCanaryCount)
+}
+
+RuntimeFoundationWrappers.test("_stdlib_NSStringHasSuffixNFDPointer/NoLeak") {
+  nsStringCanaryCount = 0
+  autoreleasepool {
+    let a = NSStringCanary()
+    let b = NSStringCanary()
+    expectEqual(2, nsStringCanaryCount)
+    let ptrA = unsafeBitCast(a, to: OpaquePointer.self)
+    let ptrB = unsafeBitCast(b, to: OpaquePointer.self)
+    _stdlib_NSStringHasSuffixNFDPointer(ptrA, ptrB)
   }
   expectEqual(0, nsStringCanaryCount)
 }

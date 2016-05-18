@@ -4,14 +4,44 @@
 
 import Foundation
 
-class BridgedClass : NSObject, NSCopying { 
+public class BridgedClass : NSObject, NSCopying {
   @objc(copyWithZone:)
-  func copy(with zone: NSZone) -> AnyObject {
+  public func copy(with zone: NSZone?) -> AnyObject {
     return self
   }
 }
 
-class BridgedClassSub : BridgedClass { }
+public class BridgedClassSub : BridgedClass { }
+
+// Attempt to bridge to a non-whitelisted type from another module.
+extension LazyFilterIterator : _ObjectiveCBridgeable { // expected-error{{conformance of 'LazyFilterIterator' to '_ObjectiveCBridgeable' can only be written in module 'Swift'}}
+  public typealias _ObjectiveCType = BridgedClassSub
+
+  public static func _isBridgedToObjectiveC() -> Bool { return true }
+
+  public func _bridgeToObjectiveC() -> _ObjectiveCType {
+    return BridgedClassSub()
+  }
+
+  public static func _forceBridgeFromObjectiveC(
+    _ source: _ObjectiveCType,
+    result: inout LazyFilterIterator?
+  ) { }
+
+  public static func _conditionallyBridgeFromObjectiveC(
+    _ source: _ObjectiveCType,
+    result: inout LazyFilterIterator?
+  ) -> Bool {
+    return true
+  }
+
+  public static func _unconditionallyBridgeFromObjectiveC(_ source: _ObjectiveCType?)
+      -> LazyFilterIterator {
+    let result: LazyFilterIterator?
+    return result!
+  }
+}
+
 
 struct BridgedStruct : Hashable, _ObjectiveCBridgeable {
   var hashValue: Int { return 0 }
@@ -20,24 +50,27 @@ struct BridgedStruct : Hashable, _ObjectiveCBridgeable {
     return true
   }
   
-  static func _getObjectiveCType() -> Any.Type {
-    return BridgedClass.self
-  }
-
   func _bridgeToObjectiveC() -> BridgedClass {
     return BridgedClass()
   }
 
   static func _forceBridgeFromObjectiveC(
-    x: BridgedClass,
+    _ x: BridgedClass,
     result: inout BridgedStruct?) {
   }
 
   static func _conditionallyBridgeFromObjectiveC(
-    x: BridgedClass,
+    _ x: BridgedClass,
     result: inout BridgedStruct?
   ) -> Bool {
     return true
+  }
+
+  static func _unconditionallyBridgeFromObjectiveC(_ source: BridgedClass?)
+      -> BridgedStruct {
+    var result: BridgedStruct? = nil
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
   }
 }
 
@@ -55,23 +88,23 @@ class OtherClass : Hashable {
 func ==(x: OtherClass, y: OtherClass) -> Bool { return true }
 
 // Basic bridging
-func bridgeToObjC(s: BridgedStruct) -> BridgedClass {
-  return s
+func bridgeToObjC(_ s: BridgedStruct) -> BridgedClass {
+  return s // expected-error{{cannot convert return expression of type 'BridgedStruct' to return type 'BridgedClass'}}
   return s as BridgedClass
 }
 
-func bridgeToAnyObject(s: BridgedStruct) -> AnyObject {
-  return s
+func bridgeToAnyObject(_ s: BridgedStruct) -> AnyObject {
+  return s // expected-error{{return expression of type 'BridgedStruct' does not conform to 'AnyObject'}}
   return s as AnyObject
 }
 
-func bridgeFromObjC(c: BridgedClass) -> BridgedStruct {
-  return c // expected-error{{cannot convert return expression of type 'BridgedClass' to return type 'BridgedStruct'}}
+func bridgeFromObjC(_ c: BridgedClass) -> BridgedStruct {
+  return c // expected-error{{'BridgedClass' is not implicitly convertible to 'BridgedStruct'; did you mean to use 'as' to explicitly convert?}}
   return c as BridgedStruct
 }
 
-func bridgeFromObjCDerived(s: BridgedClassSub) -> BridgedStruct {
-  return s // expected-error{{cannot convert return expression of type 'BridgedClassSub' to return type 'BridgedStruct'}}
+func bridgeFromObjCDerived(_ s: BridgedClassSub) -> BridgedStruct {
+  return s // expected-error{{'BridgedClassSub' is not implicitly convertible to 'BridgedStruct'; did you mean to use 'as' to explicitly convert?}}
   return s as BridgedStruct
 }
 
@@ -79,10 +112,10 @@ func bridgeFromObjCDerived(s: BridgedClassSub) -> BridgedStruct {
 func arrayToNSArray() {
   var nsa: NSArray
 
-  nsa = [AnyObject]()
-  nsa = [BridgedClass]()
-  nsa = [OtherClass]()
-  nsa = [BridgedStruct]()
+  nsa = [AnyObject]() // expected-error {{cannot assign value of type '[AnyObject]' to type 'NSArray'}}
+  nsa = [BridgedClass]() // expected-error {{cannot assign value of type '[BridgedClass]' to type 'NSArray'}}
+  nsa = [OtherClass]() // expected-error {{cannot assign value of type '[OtherClass]' to type 'NSArray'}}
+  nsa = [BridgedStruct]() // expected-error {{cannot assign value of type '[BridgedStruct]' to type 'NSArray'}}
   nsa = [NotBridgedStruct]() // expected-error{{cannot assign value of type '[NotBridgedStruct]' to type 'NSArray'}}
 
   nsa = [AnyObject]() as NSArray
@@ -94,7 +127,7 @@ func arrayToNSArray() {
 }
 
 // NSArray -> Array
-func nsArrayToArray(nsa: NSArray) {
+func nsArrayToArray(_ nsa: NSArray) {
   var arr1: [AnyObject] = nsa // expected-error{{'NSArray' is not implicitly convertible to '[AnyObject]'; did you mean to use 'as' to explicitly convert?}} {{30-30= as [AnyObject]}}
   var _: [BridgedClass] = nsa // expected-error{{'NSArray' is not convertible to '[BridgedClass]'}} {{30-30= as! [BridgedClass]}}
   var _: [OtherClass] = nsa // expected-error{{'NSArray' is not convertible to '[OtherClass]'}} {{28-28= as! [OtherClass]}}
@@ -117,13 +150,13 @@ func dictionaryToNSDictionary() {
 
   var nsd: NSDictionary
 
-  nsd = [NSObject : AnyObject]()
+  nsd = [NSObject : AnyObject]() // expected-error {{cannot assign value of type '[NSObject : AnyObject]' to type 'NSDictionary'}}
   nsd = [NSObject : AnyObject]() as NSDictionary
-  nsd = [NSObject : BridgedClass]()
+  nsd = [NSObject : BridgedClass]() // expected-error {{cannot assign value of type '[NSObject : BridgedClass]' to type 'NSDictionary'}}
   nsd = [NSObject : BridgedClass]() as NSDictionary
-  nsd = [NSObject : OtherClass]()
+  nsd = [NSObject : OtherClass]() // expected-error {{cannot assign value of type '[NSObject : OtherClass]' to type 'NSDictionary'}}
   nsd = [NSObject : OtherClass]() as NSDictionary
-  nsd = [NSObject : BridgedStruct]()
+  nsd = [NSObject : BridgedStruct]() // expected-error {{cannot assign value of type '[NSObject : BridgedStruct]' to type 'NSDictionary'}}
   nsd = [NSObject : BridgedStruct]() as NSDictionary
   nsd = [NSObject : NotBridgedStruct]() // expected-error{{cannot assign value of type '[NSObject : NotBridgedStruct]' to type 'NSDictionary'}}
   nsd = [NSObject : NotBridgedStruct]() as NSDictionary // expected-error{{cannot convert value of type '[NSObject : NotBridgedStruct]' to type 'NSDictionary' in coercion}}
@@ -133,25 +166,25 @@ func dictionaryToNSDictionary() {
   nsd = [NSObject : BridgedStruct?]()  // expected-error{{cannot assign value of type '[NSObject : BridgedStruct?]' to type 'NSDictionary'}}
   nsd = [NSObject : BridgedStruct?]() as NSDictionary //expected-error{{cannot convert value of type '[NSObject : BridgedStruct?]' to type 'NSDictionary' in coercion}}
 
-  nsd = [BridgedClass : AnyObject]()
+  nsd = [BridgedClass : AnyObject]() // expected-error {{cannot assign value of type '[BridgedClass : AnyObject]' to type 'NSDictionary'}}
   nsd = [BridgedClass : AnyObject]() as NSDictionary
-  nsd = [OtherClass : AnyObject]()
+  nsd = [OtherClass : AnyObject]() // expected-error {{cannot assign value of type '[OtherClass : AnyObject]' to type 'NSDictionary'}}
   nsd = [OtherClass : AnyObject]() as NSDictionary
-  nsd = [BridgedStruct : AnyObject]()
+  nsd = [BridgedStruct : AnyObject]() // expected-error {{cannot assign value of type '[BridgedStruct : AnyObject]' to type 'NSDictionary'}}
   nsd = [BridgedStruct : AnyObject]() as NSDictionary
   nsd = [NotBridgedStruct : AnyObject]()  // expected-error{{cannot assign value of type '[NotBridgedStruct : AnyObject]' to type 'NSDictionary'}}
   nsd = [NotBridgedStruct : AnyObject]() as NSDictionary  // expected-error{{cannot convert value of type '[NotBridgedStruct : AnyObject]' to type 'NSDictionary' in coercion}}
 
   // <rdar://problem/17134986>
   var bcOpt: BridgedClass?
-  nsd = [BridgedStruct() : bcOpt] // expected-error{{value of optional type 'BridgedClass?' not unwrapped; did you mean to use '!' or '?'?}}
+  nsd = [BridgedStruct() : bcOpt] // expected-error{{value of type 'BridgedStruct' does not conform to expected dictionary key type 'NSCopying'}}
   bcOpt = nil
   _ = nsd
 }
 
 // In this case, we should not implicitly convert Dictionary to NSDictionary.
 struct NotEquatable {}
-func notEquatableError(d: Dictionary<Int, NotEquatable>) -> Bool {
+func notEquatableError(_ d: Dictionary<Int, NotEquatable>) -> Bool {
   // FIXME: Another awful diagnostic.
   return d == d // expected-error{{binary operator '==' cannot be applied to two 'Dictionary<Int, NotEquatable>' operands}}
   // expected-note @-1 {{overloads for '==' exist with these partially matching parameter lists: }}
@@ -167,29 +200,29 @@ let d: Double = 3.14159
 inferDouble = d
 
 // rdar://problem/17962491
-var inferDouble2 = 1 % 3 / 3.0
+var inferDouble2 = 1 % 3 / 3.0 // expected-error{{'%' is unavailable: Use truncatingRemainder instead}}
 let d2: Double = 3.14159
 inferDouble2 = d2
 
 // rdar://problem/18269449
-var i1: Int = 1.5 * 3.5 // expected-error{{cannot convert value of type 'Double' to expected argument type 'Int'}}
+var i1: Int = 1.5 * 3.5 // expected-error {{binary operator '*' cannot be applied to two 'Double' operands}} expected-note {{expected an argument list of type '(Int, Int)'}}
 
 // rdar://problem/18330319
-func rdar18330319(s: String, d: [String : AnyObject]) {
+func rdar18330319(_ s: String, d: [String : AnyObject]) {
   _ = d[s] as! String?
 }
 
 // rdar://problem/19551164
-func rdar19551164a(s: String, _ a: [String]) {}
-func rdar19551164b(s: NSString, _ a: NSArray) {
+func rdar19551164a(_ s: String, _ a: [String]) {}
+func rdar19551164b(_ s: NSString, _ a: NSArray) {
   rdar19551164a(s, a) // expected-error{{'NSString' is not implicitly convertible to 'String'; did you mean to use 'as' to explicitly convert?}}{{18-18= as String}}
   // expected-error@-1{{'NSArray' is not convertible to '[String]'; did you mean to use 'as!' to force downcast?}}{{21-21= as! [String]}}
 }
 
 // rdar://problem/19695671
-func takesSet<T: Hashable>(p: Set<T>) {}  // expected-note {{in call to function 'takesSet'}}
-func takesDictionary<K: Hashable, V>(p: Dictionary<K, V>) {} // expected-note {{in call to function 'takesDictionary'}}
-func takesArray<T>(t: Array<T>) {} // expected-note {{in call to function 'takesArray'}}
+func takesSet<T: Hashable>(_ p: Set<T>) {}  // expected-note {{in call to function 'takesSet'}}
+func takesDictionary<K: Hashable, V>(_ p: Dictionary<K, V>) {} // expected-note {{in call to function 'takesDictionary'}}
+func takesArray<T>(_ t: Array<T>) {} // expected-note {{in call to function 'takesArray'}}
 func rdar19695671() {
   takesSet(NSSet() as! Set) // expected-error{{generic parameter 'T' could not be inferred}}
   takesDictionary(NSDictionary() as! Dictionary) // expected-error{{generic parameter 'K' could not be inferred}}
@@ -199,17 +232,17 @@ func rdar19695671() {
 
 // This failed at one point while fixing rdar://problem/19600325.
 func getArrayOfAnyObject(_: AnyObject) -> [AnyObject] { return [] }
-func testCallback(f: (AnyObject) -> AnyObject?) {}
-testCallback { return getArrayOfAnyObject($0) }
+func testCallback(_ f: (AnyObject) -> AnyObject?) {}
+testCallback { return getArrayOfAnyObject($0) } // expected-error {{cannot convert value of type '[AnyObject]' to closure result type 'AnyObject?'}}
 
 // <rdar://problem/19724719> Type checker thinks "(optionalNSString ?? nonoptionalNSString) as String" is a forced cast
-func rdar19724719(f: (String) -> (), s1: NSString?, s2: NSString) {
+func rdar19724719(_ f: (String) -> (), s1: NSString?, s2: NSString) {
   f((s1 ?? s2) as String)
 }
 
 // <rdar://problem/19770981>
-func rdar19770981(s: String, ns: NSString) {
-  func f(s: String) {}
+func rdar19770981(_ s: String, ns: NSString) {
+  func f(_ s: String) {}
   f(ns) // expected-error{{'NSString' is not implicitly convertible to 'String'; did you mean to use 'as' to explicitly convert?}}{{7-7= as String}}
   f(ns as String)
   // 'as' has higher precedence than '>' so no parens are necessary with the fixit:
@@ -233,16 +266,16 @@ func rdar19831919() {
 // <rdar://problem/19831698> Incorrect 'as' fixits offered for invalid literal expressions
 func rdar19831698() {
   var v70 = true + 1 // expected-error{{binary operator '+' cannot be applied to operands of type 'Bool' and 'Int'}} expected-note {{overloads for '+' exist with these partially matching parameter lists: (Int, Int), (UnsafeMutablePointer<Pointee>, Int), (UnsafePointer<Pointee>, Int)}}
-  var v71 = true + 1.0 // expected-error{{cannot convert value of type 'Bool' to expected argument type 'Double'}}
+  var v71 = true + 1.0 // expected-error {{binary operator '+' cannot be applied to operands of type 'Bool' and 'Double'}} expected-note {{expected an argument list of type '(Double, Double)'}}
   var v72 = true + true // expected-error{{binary operator '+' cannot be applied to two 'Bool' operands}}
   // expected-note @-1 {{overloads for '+' exist with these partially matching parameter lists:}}
   var v73 = true + [] // expected-error{{binary operator '+' cannot be applied to operands of type 'Bool' and '[_]'}}
   // expected-note @-1 {{overloads for '+' exist with these partially matching parameter lists:}}
-  var v75 = true + "str" // expected-error{{cannot convert value of type 'Bool' to expected argument type 'String'}}
+  var v75 = true + "str" // expected-error {{binary operator '+' cannot be applied to operands of type 'Bool' and 'String'}} expected-note {{expected an argument list of type '(String, String)'}}
 }
 
 // <rdar://problem/19836341> Incorrect fixit for NSString? to String? conversions
-func rdar19836341(ns: NSString?, vns: NSString?) {
+func rdar19836341(_ ns: NSString?, vns: NSString?) {
   var vns = vns
   let _: String? = ns // expected-error{{cannot convert value of type 'NSString?' to specified type 'String?'}}
   var _: String? = ns // expected-error{{cannot convert value of type 'NSString?' to specified type 'String?'}}
@@ -258,18 +291,18 @@ func rdar19836341(ns: NSString?, vns: NSString?) {
 }
 
 // <rdar://problem/20029786> Swift compiler sometimes suggests changing "as!" to "as?!"
-func rdar20029786(ns: NSString?) {
-  var s: String = ns ?? "str" as String as String // expected-error{{'NSString' is not implicitly convertible to 'String'; did you mean to use 'as' to explicitly convert?}} {{19-19=(}} {{50-50=) as String}}
-  var s2 = ns ?? "str" as String as String
+func rdar20029786(_ ns: NSString?) {
+  var s: String = ns ?? "str" as String as String // expected-error{{cannot convert value of type 'NSString?' to expected argument type 'String?'}}
+  var s2 = ns ?? "str" as String as String // expected-error {{binary operator '??' cannot be applied to operands of type 'NSString?' and 'String'}} expected-note{{}}
 
-  let s3: NSString? = "str" as String?
+  let s3: NSString? = "str" as String? // expected-error {{cannot convert value of type 'String?' to specified type 'NSString?'}}
 
   var s4: String = ns ?? "str" // expected-error{{'NSString' is not implicitly convertible to 'String'; did you mean to use 'as' to explicitly convert?}}{{20-20=(}}{{31-31=) as String}}
   var s5: String = (ns ?? "str") as String // fixed version
 }
 
 // <rdar://problem/19813772> QoI: Using as! instead of as in this case produces really bad diagnostic
-func rdar19813772(nsma: NSMutableArray) {
+func rdar19813772(_ nsma: NSMutableArray) {
   var a1 = nsma as! Array // expected-error{{generic parameter 'Element' could not be inferred in cast to 'Array<_>'}}
   // FIXME: The following diagnostic is misleading and should not happen: expected-warning@-1{{cast from 'NSMutableArray' to unrelated type 'Array<_>' always fails}}
   var a2 = nsma as! Array<AnyObject> // expected-warning{{forced cast from 'NSMutableArray' to 'Array<AnyObject>' always succeeds; did you mean to use 'as'?}} {{17-20=as}}
@@ -278,12 +311,17 @@ func rdar19813772(nsma: NSMutableArray) {
 
 
 // <rdar://problem/20336036> QoI: Add cast-removing fixit for "Forced cast from 'T' to 'T' always succeeds"
-func force_cast_fixit(a : [NSString]) -> [NSString] {
+func force_cast_fixit(_ a : [NSString]) -> [NSString] {
   return a as! [NSString] // expected-warning {{forced cast of '[NSString]' to same type has no effect}} {{12-27=}}
 }
 
 // <rdar://problem/21244068> QoI: IUO prevents specific diagnostic + fixit about non-implicitly converted bridge types
-func rdar21244068(n: NSString!) -> String {
+func rdar21244068(_ n: NSString!) -> String {
   return n  // expected-error {{'NSString!' is not implicitly convertible to 'String'; did you mean to use 'as' to explicitly convert?}} {{11-11= as String}}
 }
+
+func forceBridgeDiag(_ obj: BridgedClass!) -> BridgedStruct {
+  return obj // expected-error{{'BridgedClass!' is not implicitly convertible to 'BridgedStruct'; did you mean to use 'as' to explicitly convert?}}{{13-13= as BridgedStruct}}
+}
+
 

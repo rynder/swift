@@ -1,7 +1,7 @@
 // RUN: %target-parse-verify-swift
 
-func foo(x: Int) -> Int {}
-func foo(x: Float) -> Float {}
+func foo(_ x: Int) -> Int {}
+func foo(_ x: Float) -> Float {}
 
 var v = foo(<#T##x: Float##Float#>) // expected-error {{editor placeholder}}
 v = "" // expected-error {{cannot assign value of type 'String' to type 'Float'}}
@@ -12,7 +12,7 @@ if (true) {
 
 foo(<#T##x: Undeclared##Undeclared#>) // expected-error {{editor placeholder}} expected-error {{use of undeclared type 'Undeclared'}}
 
-func f(n: Int) {}
+func f(_ n: Int) {}
 let a1 = <#T#> // expected-error{{editor placeholder in source file}}
 f(a1) // expected-error{{cannot convert value of type '()' to expected argument type 'Int'}}
 let a2 = <#T##Int#> // expected-error{{editor placeholder in source file}}
@@ -20,7 +20,7 @@ f(a2)
 <#T#> // expected-error{{editor placeholder in source file}}
 
 // FIXME: <rdar://problem/22432828> Lexer yields "editor placeholder in source file" error twice when placeholder is first token
-<#T##Int#> // expected-error 2{{editor placeholder in source file}}
+_ = <#T##Int#> // expected-error {{editor placeholder in source file}}
 
 f(<#T#> + 1) // expected-error{{editor placeholder in source file}}
 f(<#T##Int#>) // expected-error{{editor placeholder in source file}}

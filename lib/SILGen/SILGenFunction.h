@@ -465,7 +465,7 @@ public:
 
   /// Emit code to increment a counter for profiling.
   void emitProfilerIncrement(ASTNode N) {
-    if (SGM.Profiler)
+    if (SGM.Profiler && SGM.Profiler->hasRegionCounters())
       SGM.Profiler->emitCounterIncrement(B, N);
   }
   
@@ -871,6 +871,14 @@ public:
                                       SILType loweredResultTy,
                                       const ValueTransform &transform);
 
+  /// Emit a reinterpret-cast from one pointer type to another, using a library
+  /// intrinsic.
+  RValue emitPointerToPointer(SILLocation loc,
+                              ManagedValue input,
+                              CanType inputTy,
+                              CanType outputTy,
+                              SGFContext C = SGFContext());
+
   ManagedValue emitClassMetatypeToObject(SILLocation loc,
                                          ManagedValue v,
                                          SILType resultTy);
@@ -1107,6 +1115,7 @@ public:
                                 RValue &&optionalSubscripts,
                                 SILValue buffer, SILValue callbackStorage);
   bool maybeEmitMaterializeForSetThunk(ProtocolConformance *conformance,
+                                       SILLinkage linkage,
                                        FuncDecl *requirement,
                                        FuncDecl *witness,
                                        ArrayRef<Substitution> witnessSubs);
@@ -1584,16 +1593,6 @@ public:
   /// Produce a substitution for invoking a pointer argument conversion
   /// intrinsic.
   Substitution getPointerSubstitution(Type pointerType);
-
-  /// Recognize used conformances from an imported type when we must emit the
-  /// witness table.
-  ///
-  /// This arises in _BridgedNSError, where we wouldn't otherwise pull in the
-  /// witness table, causing dynamic casts to perform incorrectly.
-  void checkForImportedUsedConformances(Type type);
-  void checkForImportedUsedConformances(ExplicitCastExpr *expr) {
-    checkForImportedUsedConformances(expr->getCastTypeLoc().getType());
-  }
 };
 
 

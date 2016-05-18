@@ -2,7 +2,6 @@
 // REQUIRES: executable_test
 
 // REQUIRES: objc_interop
-// XFAIL: interpret
 
 import CoreGraphics
 import Foundation
@@ -22,6 +21,7 @@ CGFloatTestSuite.test("init") {
   expectEqual(0.0, CGFloat())
   expectEqual(4.125, CGFloat(Float(4.125)))
   expectEqual(4.125, CGFloat(Double(4.125)))
+  expectEqual(4.125, CGFloat(CGFloat(Double(4.125))))
 
   expectEqual(42, CGFloat(Int(42)))
   expectEqual(42, CGFloat(Int8(42)))
@@ -98,12 +98,10 @@ CGFloatTestSuite.test("arithmetic") {
   expectEqual(1.0, x * y)
 
   expectEqual(0.0625, x / y)
-
-  expectEqual(0.25, x % z)
 }
 
 CGFloatTestSuite.test("striding") {
-  if true {
+  do {
     var result = [CGFloat]()
     for f in stride(from: (1.0 as CGFloat), to: 2.0, by: 0.5) {
       result.append(f)
@@ -111,7 +109,7 @@ CGFloatTestSuite.test("striding") {
     expectEqual([ 1.0, 1.5 ], result)
   }
 
-  if true {
+  do {
     var result = [CGFloat]()
     for f in stride(from: (1.0 as CGFloat), through: 2.0, by: 0.5) {
       result.append(f)
@@ -122,7 +120,7 @@ CGFloatTestSuite.test("striding") {
 
 CGFloatTestSuite.test("bridging") {
   // Bridging to NSNumber.
-  if true {
+  do {
     let flt: CGFloat = 4.125
 
     // CGFloat -> NSNumber conversion.
@@ -135,7 +133,7 @@ CGFloatTestSuite.test("bridging") {
   }
 
   // Array bridging.
-  if true {
+  do {
     let originalArray: [CGFloat] = [ 4.125, 10.625 ]
 
     // Array -> NSArray

@@ -1,9 +1,5 @@
-#if _runtime(_ObjC)
-import Foundation
-#endif
-
 public class C1<T> : ClassBoundP {
-  public typealias Function = C1<T> -> S1<T> -> E1<T> -> Int
+  public typealias Function = (C1<T>) -> (S1<T>) -> (E1<T>) -> Int
   public typealias Tuple = (C1<T>, S1<T>, E1<T>, Int)
   public typealias Inner = T
   public let aClass: C1<T>
@@ -24,7 +20,7 @@ public class C1<T> : ClassBoundP {
 }
 
 public class C2<T: P1> {
-  public typealias Function = C1<T> -> S1<T> -> E1<T> -> Int
+  public typealias Function = (C1<T>) -> (S1<T>) -> (E1<T>) -> Int
   public typealias Tuple = (C2<T>, S2<T>, E2<T>, Int)
   public let aClass: C1<T>
   public let aStruct: S1<T>
@@ -45,12 +41,12 @@ public class C2<T: P1> {
 }
 
 public class C3<T: P2> {
-  public typealias Function = C3<T> -> S3<T> -> E3<T> -> Int
+  public typealias Function = (C3<T>) -> (S3<T>) -> (E3<T>) -> Int
   public typealias Tuple = (C3<T>, S3<T>, E3<T>, Int)
   public let aClass: C3<T>
   public let aStruct: S3<T>
   public let anEnum: E3<T>
-  public let function: C3<T> -> S3<T> -> E3<T> -> Int
+  public let function: (C3<T>) -> (S3<T>) -> (E3<T>) -> Int
   public let tuple: (C3<T>, S3<T>, E3<T>, Int)
   public let primaryArchetype: T
   public let dependentMember1: T.Outer
@@ -77,7 +73,7 @@ public struct S1<T> {
   public let aClass: C1<T>
   public let aStruct: Box<S1<T>>
   public let anEnum: Box<E1<T>>
-  public let function: C1<T> -> S1<T> -> E1<T> -> Int
+  public let function: (C1<T>) -> (S1<T>) -> (E1<T>) -> Int
   public let tuple: (C1<T>, Box<S1<T>>, Box<E1<T>>, Int)
   public let primaryArchetype: T
 }
@@ -86,14 +82,14 @@ public struct S2<T: P1> {
   public let aClass: C2<T>
   public let aStruct: Box<S2<T>>
   public let anEnum: Box<E2<T>>
-  public let function: C2<T> -> S2<T> -> E2<T> -> Int
+  public let function: (C2<T>) -> (S2<T>) -> (E2<T>) -> Int
   public let tuple: (C2<T>, Box<S2<T>>, Box<E2<T>>, Int)
   public let primaryArchetype: T
   public let dependentMember1: T.Inner
 }
 
 public struct S3<T: P2> {
-  public typealias Function = C3<T> -> S3<T> -> E3<T> -> Int
+  public typealias Function = (C3<T>) -> (S3<T>) -> (E3<T>) -> Int
   public typealias Tuple = (C3<T>, Box<S3<T>>, Box<E3<T>>, Int)
   public let aClass: C3<T>
   public let aStruct: Box<S3<T>>
@@ -162,16 +158,3 @@ extension E4 : P1, P2, P3 {
   public typealias Outer = U
   public typealias Second = U
 }
-
-#if _runtime(_ObjC)
-
-public class GenericOC<T> : NSObject {
-  public let ocnss: GenericOC<NSString>
-  public let occfs: GenericOC<CFString>
-  public init(nss: GenericOC<NSString>, cfs: GenericOC<CFString>) {
-    self.ocnss = nss
-    self.occfs = cfs
-  }
-}
-
-#endif

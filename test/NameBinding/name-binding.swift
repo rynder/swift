@@ -124,12 +124,12 @@ func overloadtest(x: Int) {
 
   // Test overloaded operators.
   let s : a_struct
-  4 *** 17     // Resolved to the *** operator that takes ints.
+  _ = 4 *** 17     // Resolved to the *** operator that takes ints.
   s *** s     // Resolved to the *** operator that takes a_struct.
   s *** {$0 + 4}     // Closure obviously not a struct.
 
-  ov_fn_result2()(4)(4)  // picks the ov_fn_result2 taking an Int.
-  ov_fn_result2()(4)(s)  // picks the ov_fn_result2 taking a_struct.
+  _ = ov_fn_result2()(4)(4)  // picks the ov_fn_result2 taking an Int.
+  _ = ov_fn_result2()(4)(s)  // picks the ov_fn_result2 taking a_struct.
 }
 
 func localtest() {
@@ -211,13 +211,21 @@ print(forwardReferenceVar, terminator: ""); var forwardReferenceVar: Int = 0
 
 // <rdar://problem/23248290> Name lookup: "Cannot convert type 'Int' to expected argument type 'Int'" while trying to initialize ivar of generic type in class scope
 // https://gist.github.com/erynofwales/61768899502b7ac83c6e
-struct Matrix4<T: FloatingPoint>  {
+struct Matrix4<T: FloatingPoint> {
   static func size() -> Int {}
   
   private var data: Int = Matrix4.size()   // Ok: Matrix4<T>
   
   init() {
     data = Matrix4.size()  // Ok: Matrix4<T>
+  }
+}
+
+// <rdar://problem/19558785> for-in collection/where expressions are parsed with pattern variables in scope
+func r19558785() {
+  let b = 10
+  for b in 0...b {
+    _ = b
   }
 }
 

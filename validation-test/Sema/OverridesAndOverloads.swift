@@ -4,14 +4,6 @@
 
 import StdlibUnittest
 
-// Also import modules which are used by StdlibUnittest internally. This
-// workaround is needed to link all required libraries in case we compile
-// StdlibUnittest with -sil-serialize-all.
-import SwiftPrivate
-import SwiftPrivatePthreadExtras
-#if _runtime(_ObjC)
-import ObjectiveC
-#endif
 
 struct Token1 {}
 struct Token2 {}
@@ -130,10 +122,10 @@ Overrides.test("contravariant return type override, optional to non-optional") {
     }
   }
 
-  Derived().foo() as C1
+  _ = Derived().foo() as C1
   expectEqual("Derived.foo() -> C1", which)
 
-  Derived().foo() as C1?
+  _ = Derived().foo() as C1?
   expectEqual("Derived.foo() -> C1", which)
 }
 
@@ -147,10 +139,10 @@ Overrides.test("contravariant return type override, base class to derived class"
     }
   }
 
-  Derived().foo() as C1
+  _ = Derived().foo() as C1
   expectEqual("Derived.foo() -> C1x", which)
 
-  Derived().foo() as C1x
+  _ = Derived().foo() as C1x
   expectEqual("Derived.foo() -> C1x", which)
 }
 
@@ -164,10 +156,10 @@ Overrides.test("contravariant return type override, optional base class to non-o
     }
   }
 
-  Derived().foo() as C1
+  _ = Derived().foo() as C1
   expectEqual("Derived.foo() -> C1x", which)
 
-  Derived().foo() as C1x
+  _ = Derived().foo() as C1x
   expectEqual("Derived.foo() -> C1x", which)
 }
 
@@ -188,7 +180,7 @@ Overrides.test("contravariant return type override, protocol to protocol") {
   // Derived().foo() as P1 // error: ambiguous use of 'foo()'
   // expectEqual("Derived.foo() -> P1x", which)
 
-  Derived().foo() as P1x
+  _ = Derived().foo() as P1x
   expectEqual("Derived.foo() -> P1x", which)
 }
 
@@ -209,7 +201,7 @@ Overrides.test("contravariant return type override, protocol to struct") {
   // Derived().foo() as P1 // error: ambiguous use of 'foo()'
   // expectEqual("Derived.foo() -> P1ImplS1", which)
 
-  Derived().foo() as P1ImplS1
+  _ = Derived().foo() as P1ImplS1
   expectEqual("Derived.foo() -> P1ImplS1", which)
 }
 

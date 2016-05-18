@@ -244,7 +244,7 @@
         {
           key.kind: source.lang.swift.decl.function.method.instance,
           key.accessibility: source.lang.swift.accessibility.internal,
-          key.name: "testParams(_:name:)",
+          key.name: "testParams(arg1:name:)",
           key.offset: 429,
           key.length: 120,
           key.nameoffset: 434,
@@ -258,8 +258,8 @@
               key.offset: 445,
               key.length: 9,
               key.typename: "Int",
-              key.nameoffset: 0,
-              key.namelength: 0
+              key.nameoffset: 445,
+              key.namelength: 4
             },
             {
               key.kind: source.lang.swift.decl.var.parameter,
@@ -333,7 +333,7 @@
         {
           key.kind: source.lang.swift.decl.function.method.instance,
           key.accessibility: source.lang.swift.accessibility.internal,
-          key.name: "testParamAndArg(_:param:)",
+          key.name: "testParamAndArg(arg1:param:)",
           key.offset: 555,
           key.length: 55,
           key.nameoffset: 560,
@@ -347,8 +347,8 @@
               key.offset: 576,
               key.length: 9,
               key.typename: "Int",
-              key.nameoffset: 0,
-              key.namelength: 0
+              key.nameoffset: 576,
+              key.namelength: 4
             },
             {
               key.kind: source.lang.swift.decl.var.parameter,
@@ -381,11 +381,6 @@
       key.namelength: 11,
       key.bodyoffset: 654,
       key.bodylength: 186,
-      key.attributes: [
-        {
-          key.attribute: source.decl.attribute.__raw_doc_comment
-        }
-      ],
       key.substructure: [
         {
           key.kind: source.lang.swift.syntaxtype.comment.mark,
@@ -397,18 +392,13 @@
         {
           key.kind: source.lang.swift.decl.function.method.instance,
           key.accessibility: source.lang.swift.accessibility.internal,
-          key.name: "test(_:)",
+          key.name: "test(arg1:)",
           key.offset: 683,
           key.length: 156,
           key.nameoffset: 688,
           key.namelength: 16,
           key.bodyoffset: 713,
           key.bodylength: 125,
-          key.attributes: [
-            {
-              key.attribute: source.decl.attribute.__raw_doc_comment
-            }
-          ],
           key.substructure: [
             {
               key.kind: source.lang.swift.decl.var.parameter,
@@ -416,8 +406,8 @@
               key.offset: 693,
               key.length: 10,
               key.typename: "Bool",
-              key.nameoffset: 0,
-              key.namelength: 0
+              key.nameoffset: 693,
+              key.namelength: 4
             },
             {
               key.kind: source.lang.swift.syntaxtype.comment.mark,
@@ -467,7 +457,7 @@
     {
       key.kind: source.lang.swift.decl.function.free,
       key.accessibility: source.lang.swift.accessibility.internal,
-      key.name: "test2(_:)",
+      key.name: "test2(arg1:)",
       key.offset: 843,
       key.length: 105,
       key.nameoffset: 848,
@@ -481,8 +471,8 @@
           key.offset: 854,
           key.length: 10,
           key.typename: "Bool",
-          key.nameoffset: 0,
-          key.namelength: 0
+          key.nameoffset: 854,
+          key.namelength: 4
         },
         {
           key.kind: source.lang.swift.stmt.if,
@@ -552,12 +542,7 @@
       key.length: 15,
       key.typename: "Qtys",
       key.nameoffset: 1040,
-      key.namelength: 4,
-      key.attributes: [
-        {
-          key.attribute: source.decl.attribute.__raw_doc_comment
-        }
-      ]
+      key.namelength: 4
     },
     {
       key.kind: source.lang.swift.decl.function.free,
@@ -902,9 +887,6 @@
       key.attributes: [
         {
           key.attribute: source.decl.attribute.objc
-        },
-        {
-          key.attribute: source.decl.attribute.__raw_doc_comment
         }
       ],
       key.elements: [

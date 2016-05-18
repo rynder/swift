@@ -6,7 +6,7 @@ import Builtin
 import Swift
 
 class RawBuffer {}
-class HeapBufferStorage<T,U> : RawBuffer {}
+class HeapBufferStorage<T, U> : RawBuffer {}
 
 enum FakeOptional<T> {
   case none
@@ -198,10 +198,10 @@ bb0(%0 : $Int64):
 // CHECK: cond_br
 // CHECK: {{^bb}}
 // CHECK-NEXT: integer_literal
-// CHECK-NEXT: br
+// CHECK-NEXT: br bb
 // CHECK: {{^bb}}
 // CHECK-NEXT: integer_literal
-// CHECK-NEXT: br
+// CHECK-NEXT: br bb
 sil @do_not_fold_integer_literal : $@convention(thin) (Builtin.Int1) -> Builtin.Int1 {
 bb0(%0 : $Builtin.Int1):
   cond_br %0, bb1, bb3
@@ -225,10 +225,10 @@ enum BoolLike { case true_, false_ }
 // CHECK: switch_enum
 // CHECK: {{^bb}}
 // CHECK-NOT: enum
-// CHECK-NEXT: br
+// CHECK-NEXT: br bb
 // CHECK: {{^bb}}
 // CHECK-NOT: enum
-// CHECK-NEXT: br
+// CHECK-NEXT: br bb
 sil @fold_enum : $@convention(thin) (BoolLike) -> BoolLike {
 bb0(%0 : $BoolLike):
   switch_enum %0 : $BoolLike, case #BoolLike.true_!enumelt: bb1, case #BoolLike.false_!enumelt: bb2
@@ -250,10 +250,10 @@ bb3(%3 : $BoolLike):
 // CHECK: switch_enum
 // CHECK: {{^bb}}
 // CHECK-NEXT: enum
-// CHECK-NEXT: br
+// CHECK-NEXT: br bb
 // CHECK: {{^bb}}
 // CHECK-NEXT: enum
-// CHECK-NEXT: br
+// CHECK-NEXT: br bb
 sil @do_not_fold_enum : $@convention(thin) (BoolLike) -> BoolLike {
 bb0(%0 : $BoolLike):
   switch_enum %0 : $BoolLike, case #BoolLike.true_!enumelt: bb1, case #BoolLike.false_!enumelt: bb2
@@ -2604,7 +2604,7 @@ class CC4 {
 // Function that takes different kinds of arguments: @in, @guaranteed, @owned, 
 sil @closure_with_in_guaranteed_owned_in_args : $@convention(method) (@in CC2, @guaranteed CC1, @owned CC3, @in CC4) -> Optional<Int>
 
-// Test the peephole performing apply{partial_apply(x,y,z)}(a) -> apply(a,x,y,z)
+// Test the peephole performing apply{partial_apply(x, y, z)}(a) -> apply(a, x, y, z)
 // We need to check the following:
 // - all arguments of a partial_apply, which are either results of a stack_alloc or consumed indirect arguments
 //  should be copied into temporaries. This should happen just before that partial_apply instruction.
@@ -2729,6 +2729,47 @@ bb3:
   return %36 : $Optional<Int>
 }
 
+// Test if we insert the right stack/dealloc-stack when converting apply{partial_apply}.
+
+// CHECK-LABEL: sil @test_stack_insertion_for_partial_apply_apply
+// CHECK:     bb0({{.*}}):
+// CHECK-NEXT:  [[T:%[0-9]+]] = alloc_stack $Int
+// CHECK-NEXT:  alloc_stack $Bool
+// CHECK-NEXT:  [[S2:%[0-9]+]] = alloc_stack $Int
+// CHECK:       copy_addr [[S2]] to [initialization] [[T]]
+// CHECK:       dealloc_stack [[S2]] : $*Int
+// CHECK:       apply
+// CHECK:     bb1:
+// CHECK-NOT:   dealloc_stack
+// CHECK:     bb2:
+// CHECK:       dealloc_stack {{.*}} : $*Bool
+// CHECK:       dealloc_stack [[T]] : $*Int
+// CHECK:       return
+sil @test_stack_insertion_for_partial_apply_apply : $@convention(thin) (Int, Double) -> () {
+bb0(%0 : $Int, %1 : $Double):
+  %s1 = alloc_stack $Bool
+  %s2 = alloc_stack $Int
+  store %0 to %s2 : $*Int
+  %f1 = function_ref @callee : $@convention(thin) (Double, @in_guaranteed Int) -> ()
+  %pa = partial_apply %f1(%s2) : $@convention(thin) (Double, @in_guaranteed Int) -> ()
+  dealloc_stack %s2 : $*Int
+  %a1 = apply %pa(%1) : $@callee_owned (Double) -> ()
+  cond_br undef, bb1, bb2
+
+bb1:
+  %f2 = function_ref @noreturn_func : $@convention(thin) @noreturn () -> ()
+  %a2 = apply %f2() : $@convention(thin) @noreturn () -> ()
+  unreachable
+
+bb2:
+  dealloc_stack %s1 : $*Bool
+  %r = tuple()
+  return %r : $()
+}
+
+sil @callee : $@convention(thin) (Double, @in_guaranteed Int) -> ()
+sil @noreturn_func : $@convention(thin) @noreturn () -> ()
+
 // CHECK-LABEL: sil @remove_destroy_array
 // CHECK-NOT: destroyArray
 // CHECK: return
@@ -2846,3 +2887,51 @@ bb1(%4 : $Builtin.Int32):
 bb2(%5 : $MyErrorType):
   throw %5 : $MyErrorType
 }
+
+protocol PM {
+  var sum: Int { get nonmutating set }
+  func done()
+}
+
+extension PM {
+  func plus() -> Self
+  func minus()
+}
+
+
+public final class VV {
+  @sil_stored final var m: PM { get set }
+  init()
+  deinit
+}
+
+sil @plus : $@convention(method) <Self where Self : PM> (@in_guaranteed Self) -> @out Self
+
+sil @minus : $@convention(method) <Self where Self : PM> (@in_guaranteed Self) -> () 
+
+// CHECK-LABEL: sil @silcombine_dont_change_allocstack_for_opened_archetypes
+// CHECK-NOT: alloc_stack{{.*}}opened
+// CHECK: open_existential_addr {{%[0-9]+}} : $*PM to $*@opened("090C3DB0-1C76-11E6-81C4-B8E856428C60") PM
+// CHECK: return
+sil @silcombine_dont_change_allocstack_for_opened_archetypes : $@convention(thin) (@owned VV) -> () {
+bb0(%0 : $VV):
+  %8 = alloc_stack $PM, let, name "x"
+  %9 = ref_element_addr %0 : $VV, #VV.m
+  %10 = alloc_stack $PM
+  copy_addr %9 to [initialization] %10 : $*PM
+  %12 = open_existential_addr %10 : $*PM to $*@opened("090C3DB0-1C76-11E6-81C4-B8E856428C60") PM
+  %13 = init_existential_addr %8 : $*PM, $@opened("090C3DB0-1C76-11E6-81C4-B8E856428C60") PM
+  %14 = function_ref @plus : $@convention(method) <τ_0_0 where τ_0_0 : PM> (@in_guaranteed τ_0_0) -> @out τ_0_0
+  %15 = apply %14<@opened("090C3DB0-1C76-11E6-81C4-B8E856428C60") PM>(%13, %12) : $@convention(method) <τ_0_0 where τ_0_0 : PM> (@in_guaranteed τ_0_0) -> @out τ_0_0
+  destroy_addr %12 : $*@opened("090C3DB0-1C76-11E6-81C4-B8E856428C60") PM
+  deinit_existential_addr %10 : $*PM
+  dealloc_stack %10 : $*PM
+  %20 = function_ref @minus : $@convention(method) <τ_0_0 where τ_0_0 : PM> (@in_guaranteed τ_0_0) -> ()
+  %21 = apply %20<@opened("090C3DB0-1C76-11E6-81C4-B8E856428C60") PM>(%13) : $@convention(method) <τ_0_0 where τ_0_0 : PM> (@in_guaranteed τ_0_0) -> ()
+  destroy_addr %8 : $*PM
+  dealloc_stack %8 : $*PM
+  strong_release %0 : $VV
+  %26 = tuple ()
+  return %26 : $()
+}
+

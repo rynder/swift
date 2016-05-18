@@ -452,9 +452,8 @@ auto ArchetypeBuilder::PotentialArchetype::getNestedType(
     return getRepresentative()->getNestedType(nestedName, builder);
 
     // If we already have a nested type with this name, return it.
-  llvm::TinyPtrVector<PotentialArchetype *> &nested = NestedTypes[nestedName];
-  if (!nested.empty()) {
-    return nested.front();
+  if (!NestedTypes[nestedName].empty()) {
+    return NestedTypes[nestedName].front();
   }
 
   // Attempt to resolve this nested type to an associated type
@@ -477,9 +476,11 @@ auto ArchetypeBuilder::PotentialArchetype::getNestedType(
           continue;
 
         auto type = alias->getUnderlyingType();
+        SmallVector<Identifier, 4> identifiers;
+        
         if (auto archetype = type->getAs<ArchetypeType>()) {
-          auto containingProtocol = cast<ProtocolDecl>(alias->getParent());
-          SmallVector<Identifier, 4> identifiers;
+          auto containingProtocol = dyn_cast<ProtocolDecl>(alias->getParent());
+          if (!containingProtocol) continue;
           
           // Go up archetype parents until we find our containing protocol.
           while (archetype->getSelfProtocol() != containingProtocol) {
@@ -490,19 +491,32 @@ auto ArchetypeBuilder::PotentialArchetype::getNestedType(
           }
           if (!archetype)
             continue;
-          
+        } else if (auto dependent = type->getAs<DependentMemberType>()) {
+          do {
+            identifiers.push_back(dependent->getName());
+            dependent = dependent->getBase()->getAs<DependentMemberType>();
+          } while (dependent);
+        }
+        
+        if (identifiers.size()) {
           // Go down our PAs until we find the referenced PA.
           auto existingPA = this;
-          while(identifiers.size()) {
-            existingPA = existingPA->getNestedType(identifiers.back(), builder);
-            existingPA = existingPA->getRepresentative();
-            if (existingPA == this)
-              break;
+          while (identifiers.size()) {
+            auto identifier = identifiers.back();
+            // If we end up looking for ourselves, don't recurse.
+            if (existingPA == this && identifier == nestedName) {
+              existingPA = pa;
+            } else {
+              existingPA = existingPA->getNestedType(identifier, builder);
+              existingPA = existingPA->getRepresentative();
+            }
             identifiers.pop_back();
           }
-          pa->Representative = existingPA;
-          RequirementSource source(RequirementSource::Inferred, SourceLoc());
-          pa->SameTypeSource = source;
+          if (pa != existingPA) {
+            pa->Representative = existingPA;
+            RequirementSource source(RequirementSource::Inferred, SourceLoc());
+            pa->SameTypeSource = source;
+          }
         } else if (type->hasArchetype()) {
           // This is a complex type involving other associatedtypes, we'll fail
           // to resolve and get a special diagnosis in finalize.
@@ -516,26 +530,32 @@ auto ArchetypeBuilder::PotentialArchetype::getNestedType(
       // If we have resolved this nested type to more than one associated
       // type, create same-type constraints between them.
       RequirementSource source(RequirementSource::Inferred, SourceLoc());
+      llvm::TinyPtrVector<PotentialArchetype *> &nested =
+          NestedTypes[nestedName];
       if (!nested.empty()) {
         auto existing = nested.front();
-        if (auto alias = existing->getTypeAliasDecl()) {
+        if (existing->getTypeAliasDecl() && !pa->getTypeAliasDecl()) {
           // If we found a typealias first, and now have an associatedtype
           // with the same name, it was a Swift 2 style declaration of the
           // type an inherited associatedtype should be bound to. In such a
           // case we want to make sure the associatedtype is frontmost to
           // generate generics/witness lists correctly, and the alias
           // will be unused/useless for generic constraining anyway.
-          alias->setInvalid();
-          nested.clear();
+          for (auto existing : nested) {
+            existing->Representative = pa;
+            existing->Representative->EquivalenceClass.push_back(existing);
+            existing->SameTypeSource = source;
+          }
+          nested.insert(nested.begin(), pa);
+          NestedTypes[nestedName] = nested;
         } else {
           pa->Representative = existing->getRepresentative();
           pa->Representative->EquivalenceClass.push_back(pa);
           pa->SameTypeSource = source;
+          nested.push_back(pa);
         }
-      }
-
-      // Add this resolved nested type.
-      nested.push_back(pa);
+      } else
+        nested.push_back(pa);
 
       // If there's a superclass constraint that conforms to the protocol,
       // add the appropriate same-type relationship.
@@ -548,6 +568,7 @@ auto ArchetypeBuilder::PotentialArchetype::getNestedType(
 
   // We couldn't resolve the nested type yet, so create an
   // unresolved associated type.
+  llvm::TinyPtrVector<PotentialArchetype *> &nested = NestedTypes[nestedName];
   if (nested.empty()) {
     nested.push_back(new PotentialArchetype(this, nestedName));
     ++builder.Impl->NumUnresolvedNestedTypes;
@@ -662,8 +683,11 @@ ArchetypeBuilder::PotentialArchetype::getType(ArchetypeBuilder &builder) {
       (void) resolver;
 
       // Resolve the member type.
-      auto depMemberType = getDependentType(builder, false)
-        ->castTo<DependentMemberType>();
+      auto type = getDependentType(builder, false);
+      if (type->is<ErrorType>())
+        return NestedType::forConcreteType(type);
+
+      auto depMemberType = type->castTo<DependentMemberType>();
       Type memberType = depMemberType->substBaseType(
                           &mod,
                           parent->ArchetypeOrConcreteType.getAsConcreteType(),

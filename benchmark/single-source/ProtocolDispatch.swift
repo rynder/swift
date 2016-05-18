@@ -13,12 +13,12 @@
 import TestsUtils
 
 @inline(never)
-public func run_ProtocolDispatch(N: Int) {
+public func run_ProtocolDispatch(_ N: Int) {
 
   let x = someProtocolFactory()
 
   for _ in 0...1000000 * N {
-    x.getValue()
+    _ = x.getValue()
   }
 }
 

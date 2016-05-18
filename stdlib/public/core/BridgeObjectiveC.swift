@@ -28,14 +28,6 @@ public protocol _ObjectiveCBridgeable {
   @warn_unused_result
   static func _isBridgedToObjectiveC() -> Bool
 
-  // _getObjectiveCType is a workaround: right now protocol witness
-  // tables don't include associated types, so we cannot find
-  // '_ObjectiveCType.self' from them.
-
-  /// Must return `_ObjectiveCType.self`.
-  @warn_unused_result
-  static func _getObjectiveCType() -> Any.Type
-
   /// Convert `self` to Objective-C.
   @warn_unused_result
   func _bridgeToObjectiveC() -> _ObjectiveCType
@@ -51,7 +43,7 @@ public protocol _ObjectiveCBridgeable {
   /// - parameter result: The location where the result is written. The optional
   ///   will always contain a value.
   static func _forceBridgeFromObjectiveC(
-    source: _ObjectiveCType,
+    _ source: _ObjectiveCType,
     result: inout Self?
   )
 
@@ -69,8 +61,9 @@ public protocol _ObjectiveCBridgeable {
   ///   information is provided for the convenience of the runtime's `dynamic_cast`
   ///   implementation, so that it need not look into the optional representation
   ///   to determine success.
+  @discardableResult
   static func _conditionallyBridgeFromObjectiveC(
-    source: _ObjectiveCType,
+    _ source: _ObjectiveCType,
     result: inout Self?
   ) -> Bool
 
@@ -96,17 +89,8 @@ public protocol _ObjectiveCBridgeable {
   /// implementation of `Swift.Array`'s conformance to
   /// `_ObjectiveCBridgeable` will produce an empty array rather than
   /// dynamically failing.
-  static func _unconditionallyBridgeFromObjectiveC(source: _ObjectiveCType?)
+  static func _unconditionallyBridgeFromObjectiveC(_ source: _ObjectiveCType?)
       -> Self
-}
-
-public extension _ObjectiveCBridgeable {
-  static func _unconditionallyBridgeFromObjectiveC(source: _ObjectiveCType?)
-      -> Self {
-    var result: Self? = nil
-    _forceBridgeFromObjectiveC(source!, result: &result)
-    return result!
-  }
 }
 
 //===--- Bridging for metatypes -------------------------------------------===//
@@ -118,6 +102,7 @@ public extension _ObjectiveCBridgeable {
 /// a metatype, make it conform to _ObjectiveCBridgeable, and its witness table
 /// will be ABI-compatible with one that directly provided conformance to the
 /// metatype type itself.
+@_fixed_layout
 public struct _BridgeableMetatype: _ObjectiveCBridgeable {
   internal var value: AnyObject.Type
 
@@ -127,23 +112,19 @@ public struct _BridgeableMetatype: _ObjectiveCBridgeable {
     return true
   }
 
-  public static func _getObjectiveCType() -> Any.Type {
-    return AnyObject.self
-  }
-
   public func _bridgeToObjectiveC() -> AnyObject {
     return value
   }
 
   public static func _forceBridgeFromObjectiveC(
-    source: AnyObject,
+    _ source: AnyObject,
     result: inout _BridgeableMetatype?
   ) {
     result = _BridgeableMetatype(value: source as! AnyObject.Type)
   }
 
   public static func _conditionallyBridgeFromObjectiveC(
-    source: AnyObject,
+    _ source: AnyObject,
     result: inout _BridgeableMetatype?
   ) -> Bool {
     if let type = source as? AnyObject.Type {
@@ -153,6 +134,13 @@ public struct _BridgeableMetatype: _ObjectiveCBridgeable {
 
     result = nil
     return false
+  }
+
+  public static func _unconditionallyBridgeFromObjectiveC(_ source: AnyObject?)
+      -> _BridgeableMetatype {
+    var result: _BridgeableMetatype?
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
   }
 }
 
@@ -175,7 +163,7 @@ public struct _BridgeableMetatype: _ObjectiveCBridgeable {
 ///
 /// - otherwise, the result is empty.
 @warn_unused_result
-public func _bridgeToObjectiveC<T>(x: T) -> AnyObject? {
+public func _bridgeToObjectiveC<T>(_ x: T) -> AnyObject? {
   if _fastPath(_isClassOrObjCExistential(T.self)) {
     return unsafeBitCast(x, to: AnyObject.self)
   }
@@ -183,7 +171,7 @@ public func _bridgeToObjectiveC<T>(x: T) -> AnyObject? {
 }
 
 @warn_unused_result
-public func _bridgeToObjectiveCUnconditional<T>(x: T) -> AnyObject {
+public func _bridgeToObjectiveCUnconditional<T>(_ x: T) -> AnyObject {
   let optResult: AnyObject? = _bridgeToObjectiveC(x)
   _precondition(optResult != nil,
       "value failed to bridge from Swift type to a Objective-C type")
@@ -193,7 +181,7 @@ public func _bridgeToObjectiveCUnconditional<T>(x: T) -> AnyObject {
 /// Same as `_bridgeToObjectiveCUnconditional`, but autoreleases the
 /// return value if `T` is bridged non-verbatim.
 @warn_unused_result
-func _bridgeToObjectiveCUnconditionalAutorelease<T>(x: T) -> AnyObject
+func _bridgeToObjectiveCUnconditionalAutorelease<T>(_ x: T) -> AnyObject
 {
   if _fastPath(_isClassOrObjCExistential(T.self)) {
     return unsafeBitCast(x, to: AnyObject.self)
@@ -208,8 +196,8 @@ func _bridgeToObjectiveCUnconditionalAutorelease<T>(x: T) -> AnyObject
 }
 
 @warn_unused_result
-@_silgen_name("swift_bridgeNonVerbatimToObjectiveC")
-func _bridgeNonVerbatimToObjectiveC<T>(x: T) -> AnyObject?
+@_silgen_name("_swift_bridgeNonVerbatimToObjectiveC")
+func _bridgeNonVerbatimToObjectiveC<T>(_ x: T) -> AnyObject?
 
 /// Convert `x` from its Objective-C representation to its Swift
 /// representation.
@@ -218,12 +206,12 @@ func _bridgeNonVerbatimToObjectiveC<T>(x: T) -> AnyObject?
 ///   - if the dynamic type of `x` is `T` or a subclass of it, it is bridged
 ///     verbatim, the function returns `x`;
 /// - otherwise, if `T` conforms to `_ObjectiveCBridgeable`:
-///   + if the dynamic type of `x` is not `T._getObjectiveCType()`
+///   + if the dynamic type of `x` is not `T._ObjectiveCType`
 ///     or a subclass of it, trap;
 ///   + otherwise, returns the result of `T._forceBridgeFromObjectiveC(x)`;
 /// - otherwise, trap.
 @warn_unused_result
-public func _forceBridgeFromObjectiveC<T>(x: AnyObject, _: T.Type) -> T {
+public func _forceBridgeFromObjectiveC<T>(_ x: AnyObject, _: T.Type) -> T {
   if _fastPath(_isClassOrObjCExistential(T.self)) {
     return x as! T
   }
@@ -237,7 +225,8 @@ public func _forceBridgeFromObjectiveC<T>(x: AnyObject, _: T.Type) -> T {
 /// representation.
 @warn_unused_result
 @_silgen_name("_forceBridgeFromObjectiveC_bridgeable")
-public func _forceBridgeFromObjectiveC_bridgeable<T:_ObjectiveCBridgeable>(x: T._ObjectiveCType, _: T.Type) -> T {
+public func _forceBridgeFromObjectiveC_bridgeable<T:_ObjectiveCBridgeable>
+  (_ x: T._ObjectiveCType, _: T.Type) -> T {
   var result: T?
   T._forceBridgeFromObjectiveC(x, result: &result)
   return result!
@@ -252,14 +241,14 @@ public func _forceBridgeFromObjectiveC_bridgeable<T:_ObjectiveCBridgeable>(x: T.
 /// - otherwise, if `T` conforms to `_ObjectiveCBridgeable`:
 ///   + if `T._isBridgedToObjectiveC()` returns `false`, then the result is
 ///     empty;
-///   + otherwise, if the dynamic type of `x` is not `T._getObjectiveCType()`
+///   + otherwise, if the dynamic type of `x` is not `T._ObjectiveCType`
 ///     or a subclass of it, the result is empty;
 ///   + otherwise, returns the result of
 ///     `T._conditionallyBridgeFromObjectiveC(x)`;
 /// - otherwise, the result is empty.
 @warn_unused_result
 public func _conditionallyBridgeFromObjectiveC<T>(
-  x: AnyObject,
+  _ x: AnyObject,
   _: T.Type
 ) -> T? {
   if _fastPath(_isClassOrObjCExistential(T.self)) {
@@ -267,7 +256,7 @@ public func _conditionallyBridgeFromObjectiveC<T>(
   }
 
   var result: T?
-  _bridgeNonVerbatimFromObjectiveCConditional(x, T.self, &result)
+  _ = _bridgeNonVerbatimFromObjectiveCConditional(x, T.self, &result)
   return result
 }
 
@@ -276,7 +265,7 @@ public func _conditionallyBridgeFromObjectiveC<T>(
 @warn_unused_result
 @_silgen_name("_conditionallyBridgeFromObjectiveC_bridgeable")
 public func _conditionallyBridgeFromObjectiveC_bridgeable<T:_ObjectiveCBridgeable>(
-  x: T._ObjectiveCType,
+  _ x: T._ObjectiveCType,
   _: T.Type
 ) -> T? {
   var result: T?
@@ -284,9 +273,9 @@ public func _conditionallyBridgeFromObjectiveC_bridgeable<T:_ObjectiveCBridgeabl
   return result
 }
 
-@_silgen_name("swift_bridgeNonVerbatimFromObjectiveC")
+@_silgen_name("_swift_bridgeNonVerbatimFromObjectiveC")
 func _bridgeNonVerbatimFromObjectiveC<T>(
-  x: AnyObject,
+  _ x: AnyObject,
   _ nativeType: T.Type,
   _ result: inout T?
 )
@@ -298,9 +287,9 @@ func _bridgeNonVerbatimFromObjectiveC<T>(
 ///   unchanged otherwise.
 ///
 /// - Returns: `true` to indicate success, `false` to indicate failure.
-@_silgen_name("swift_bridgeNonVerbatimFromObjectiveCConditional")
+@_silgen_name("_swift_bridgeNonVerbatimFromObjectiveCConditional")
 func _bridgeNonVerbatimFromObjectiveCConditional<T>(
-  x: AnyObject,
+  _ x: AnyObject,
   _ nativeType: T.Type,
   _ result: inout T?
 ) -> Bool
@@ -320,7 +309,7 @@ public func _isBridgedToObjectiveC<T>(_: T.Type) -> Bool {
 }
 
 @warn_unused_result
-@_silgen_name("swift_isBridgedNonVerbatimToObjectiveC")
+@_silgen_name("_swift_isBridgedNonVerbatimToObjectiveC")
 func _isBridgedNonVerbatimToObjectiveC<T>(_: T.Type) -> Bool
 
 /// A type that's bridged "verbatim" does not conform to
@@ -342,7 +331,7 @@ public func _getBridgedObjectiveCType<T>(_: T.Type) -> Any.Type? {
 }
 
 @warn_unused_result
-@_silgen_name("swift_getBridgedNonVerbatimObjectiveCType")
+@_silgen_name("_swift_getBridgedNonVerbatimObjectiveCType")
 func _getBridgedNonVerbatimObjectiveCType<T>(_: T.Type) -> Any.Type?
 
 // -- Pointer argument bridging
@@ -372,8 +361,9 @@ internal var _nilNativeObject: AnyObject? {
 /// This type does not carry an owner pointer unlike the other C*Pointer types
 /// because it only needs to reference the results of inout conversions, which
 /// already have writeback-scoped lifetime.
+@_fixed_layout
 public struct AutoreleasingUnsafeMutablePointer<Pointee /* TODO : class */>
-  : Equatable, NilLiteralConvertible, _Pointer {
+  : Equatable, _Pointer {
 
   public let _rawValue: Builtin.RawPointer
 
@@ -383,11 +373,6 @@ public struct AutoreleasingUnsafeMutablePointer<Pointee /* TODO : class */>
     self._rawValue = _rawValue
   }
 
-  @_transparent
-  var _isNull : Bool {
-    return UnsafeMutablePointer<Pointee>(self)._isNull
-  }
-
   /// Access the `Pointee` instance referenced by `self`.
   ///
   /// - Precondition: the pointee has been initialized with an instance of type
@@ -395,7 +380,6 @@ public struct AutoreleasingUnsafeMutablePointer<Pointee /* TODO : class */>
   public var pointee: Pointee {
     /// Retrieve the value the pointer points to.
     @_transparent get {
-      _stdlibAssert(!_isNull)
       // We can do a strong load normally.
       return UnsafeMutablePointer<Pointee>(self).pointee
     }
@@ -406,7 +390,6 @@ public struct AutoreleasingUnsafeMutablePointer<Pointee /* TODO : class */>
     /// in ARC. This autoreleases the argument before trivially
     /// storing it to the referenced memory.
     @_transparent nonmutating set {
-      _stdlibAssert(!_isNull)
       // Autorelease the object reference.
       typealias OptionalAnyObject = AnyObject?
       Builtin.retain(unsafeBitCast(newValue, to: OptionalAnyObject.self))
@@ -414,9 +397,10 @@ public struct AutoreleasingUnsafeMutablePointer<Pointee /* TODO : class */>
       // Trivially assign it as an OpaquePointer; the pointer references an
       // autoreleasing slot, so retains/releases of the original value are
       // unneeded.
-      let p = UnsafeMutablePointer<OpaquePointer>(
+      typealias OptionalOpaquePointer = OpaquePointer?
+      let p = UnsafeMutablePointer<OptionalOpaquePointer>(
         UnsafeMutablePointer<Pointee>(self))
-        p.pointee = unsafeBitCast(newValue, to: OpaquePointer.self)
+      p.pointee = unsafeBitCast(newValue, to: OptionalOpaquePointer.self)
     }
   }
 
@@ -427,16 +411,9 @@ public struct AutoreleasingUnsafeMutablePointer<Pointee /* TODO : class */>
   public subscript(i: Int) -> Pointee {
     @_transparent
     get {
-      _stdlibAssert(!_isNull)
       // We can do a strong load normally.
       return (UnsafePointer<Pointee>(self) + i).pointee
     }
-  }
-
-  /// Create an instance initialized with `nil`.
-  @_transparent
-  public init(nilLiteral: ()) {
-    self._rawValue = _nilRawPointer
   }
 
   /// Explicit construction from an UnsafeMutablePointer.
@@ -445,8 +422,21 @@ public struct AutoreleasingUnsafeMutablePointer<Pointee /* TODO : class */>
   /// referenced memory has +1 strong ownership semantics, whereas
   /// AutoreleasingUnsafeMutablePointer implies +0 semantics.
   @_transparent public
-  init<U>(_ ptr: UnsafeMutablePointer<U>) {
-    self._rawValue = ptr._rawValue
+  init<U>(_ from: UnsafeMutablePointer<U>) {
+    self._rawValue = from._rawValue
+  }
+
+  /// Explicit construction from an UnsafeMutablePointer.
+  ///
+  /// Returns nil if `from` is nil.
+  ///
+  /// This is inherently unsafe; UnsafeMutablePointer assumes the
+  /// referenced memory has +1 strong ownership semantics, whereas
+  /// AutoreleasingUnsafeMutablePointer implies +0 semantics.
+  @_transparent public
+  init?<U>(_ from: UnsafeMutablePointer<U>?) {
+    guard let unwrapped = from else { return nil }
+    self.init(unwrapped)
   }
 
   /// Explicit construction from a UnsafePointer.
@@ -454,8 +444,20 @@ public struct AutoreleasingUnsafeMutablePointer<Pointee /* TODO : class */>
   /// This is inherently unsafe because UnsafePointers do not imply
   /// mutability.
   @_transparent
-  init<U>(_ ptr: UnsafePointer<U>) {
-    self._rawValue = ptr._rawValue
+  init<U>(_ from: UnsafePointer<U>) {
+    self._rawValue = from._rawValue
+  }
+
+  /// Explicit construction from a UnsafePointer.
+  ///
+  /// Returns nil if `from` is nil.
+  ///
+  /// This is inherently unsafe because UnsafePointers do not imply
+  /// mutability.
+  @_transparent
+  init?<U>(_ from: UnsafePointer<U>?) {
+    guard let unwrapped = from else { return nil }
+    self.init(unwrapped)
   }
 }
 
@@ -475,24 +477,25 @@ public func == <Pointee> (
   return Bool(Builtin.cmp_eq_RawPointer(lhs._rawValue, rhs._rawValue))
 }
 
+@_fixed_layout
 internal struct _CocoaFastEnumerationStackBuf {
   // Clang uses 16 pointers.  So do we.
-  internal var _item0: Builtin.RawPointer
-  internal var _item1: Builtin.RawPointer
-  internal var _item2: Builtin.RawPointer
-  internal var _item3: Builtin.RawPointer
-  internal var _item4: Builtin.RawPointer
-  internal var _item5: Builtin.RawPointer
-  internal var _item6: Builtin.RawPointer
-  internal var _item7: Builtin.RawPointer
-  internal var _item8: Builtin.RawPointer
-  internal var _item9: Builtin.RawPointer
-  internal var _item10: Builtin.RawPointer
-  internal var _item11: Builtin.RawPointer
-  internal var _item12: Builtin.RawPointer
-  internal var _item13: Builtin.RawPointer
-  internal var _item14: Builtin.RawPointer
-  internal var _item15: Builtin.RawPointer
+  internal var _item0: UnsafePointer<Void>?
+  internal var _item1: UnsafePointer<Void>?
+  internal var _item2: UnsafePointer<Void>?
+  internal var _item3: UnsafePointer<Void>?
+  internal var _item4: UnsafePointer<Void>?
+  internal var _item5: UnsafePointer<Void>?
+  internal var _item6: UnsafePointer<Void>?
+  internal var _item7: UnsafePointer<Void>?
+  internal var _item8: UnsafePointer<Void>?
+  internal var _item9: UnsafePointer<Void>?
+  internal var _item10: UnsafePointer<Void>?
+  internal var _item11: UnsafePointer<Void>?
+  internal var _item12: UnsafePointer<Void>?
+  internal var _item13: UnsafePointer<Void>?
+  internal var _item14: UnsafePointer<Void>?
+  internal var _item15: UnsafePointer<Void>?
 
   @_transparent
   internal var count: Int {
@@ -500,7 +503,7 @@ internal struct _CocoaFastEnumerationStackBuf {
   }
 
   internal init() {
-    _item0 = _nilRawPointer
+    _item0 = nil
     _item1 = _item0
     _item2 = _item0
     _item3 = _item0
@@ -517,7 +520,8 @@ internal struct _CocoaFastEnumerationStackBuf {
     _item14 = _item0
     _item15 = _item0
 
-    _sanityCheck(sizeofValue(self) >= sizeof(Builtin.RawPointer.self) * count)
+    _sanityCheck(sizeofValue(self) >=
+                   sizeof(Optional<UnsafePointer<Void>>.self) * count)
   }
 }
 
@@ -527,12 +531,12 @@ extension AutoreleasingUnsafeMutablePointer {
 
   @available(*, unavailable, renamed: "pointee")
   public var memory: Pointee {
-    fatalError("unavailable function can't be called")
+    Builtin.unreachable()
   }
 
   @available(*, unavailable, message: "Removed in Swift 3. Please use nil literal instead.")
   public init() {
-    fatalError("unavailable function can't be called")
+    Builtin.unreachable()
   }
 }
 #endif

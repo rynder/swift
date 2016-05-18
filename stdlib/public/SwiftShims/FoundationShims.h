@@ -29,6 +29,10 @@
 
 #include "SwiftStdint.h"
 
+#ifdef __cplusplus
+namespace swift { extern "C" {
+#endif
+
 typedef struct {
   __swift_intptr_t location;
   __swift_intptr_t length;
@@ -37,8 +41,8 @@ typedef struct {
 #ifdef __OBJC2__
 typedef struct {
     unsigned long state;
-    id __unsafe_unretained *itemsPtr;
-    unsigned long *mutationsPtr;
+    id __unsafe_unretained _Nullable * _Nullable itemsPtr;
+    unsigned long * _Nullable mutationsPtr;
     unsigned long extra[5];
 } _SwiftNSFastEnumerationState;
 #endif
@@ -50,7 +54,12 @@ typedef struct {
   __swift_intptr_t patchVersion;
 } _SwiftNSOperatingSystemVersion;
 
+SWIFT_RUNTIME_STDLIB_INTERFACE
 _SwiftNSOperatingSystemVersion _swift_stdlib_operatingSystemVersion();
+
+#ifdef __cplusplus
+}} // extern "C", namespace swift
+#endif
 
 #endif // SWIFT_STDLIB_SHIMS_FOUNDATIONSHIMS_H
 

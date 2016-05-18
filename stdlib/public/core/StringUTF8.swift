@@ -16,6 +16,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+// FIXME(ABI): The UTF-8 string view should conform to
+// `BidirectionalCollection`.
+
+// FIXME(ABI): The UTF-8 string view should have a custom iterator type to
+// allow performance optimizations of linear traversals.
 
 extension _StringCore {
   /// An integral type that holds a sequence of UTF-8 code units, starting in
@@ -44,7 +49,7 @@ extension _StringCore {
         size: numericCast(utf16Count))
 
       return (i + utf16Count, result)
-    } else if _fastPath(!_baseAddress._isNull) {
+    } else if _fastPath(_baseAddress != nil) {
       return _encodeSomeContiguousUTF16AsUTF8(from: i)
     } else {
 #if _runtime(_ObjC)
@@ -60,7 +65,7 @@ extension _StringCore {
   @warn_unused_result
   func _encodeSomeContiguousUTF16AsUTF8(from i: Int) -> (Int, _UTF8Chunk) {
     _sanityCheck(elementWidth == 2)
-    _sanityCheck(!_baseAddress._isNull)
+    _sanityCheck(_baseAddress != nil)
 
     let storage = UnsafeBufferPointer(start: startUTF16, count: self.count)
     return _transcodeSomeUTF16AsUTF8(storage, i)
@@ -72,10 +77,11 @@ extension _StringCore {
   @warn_unused_result
   func _encodeSomeNonContiguousUTF16AsUTF8(from i: Int) -> (Int, _UTF8Chunk) {
     _sanityCheck(elementWidth == 2)
-    _sanityCheck(_baseAddress._isNull)
+    _sanityCheck(_baseAddress == nil)
 
     let storage = _CollectionOf<Int, UInt16>(
-      startIndex: 0, endIndex: self.count) {
+      _startIndex: 0, endIndex: self.count
+    ) {
       (i: Int) -> UInt16 in
       return _cocoaStringSubscript(self, i)
     }
@@ -86,7 +92,10 @@ extension _StringCore {
 
 extension String {
   /// A collection of UTF-8 code units that encodes a `String` value.
-  public struct UTF8View : Collection, CustomStringConvertible, CustomDebugStringConvertible {
+  public struct UTF8View
+    : Collection, 
+      CustomStringConvertible, 
+      CustomDebugStringConvertible {
     internal let _core: _StringCore
     internal let _startIndex: Index
     internal let _endIndex: Index
@@ -109,7 +118,7 @@ extension String {
     }
 
     /// A position in a `String.UTF8View`.
-    public struct Index : ForwardIndex {
+    public struct Index : Comparable {
       internal typealias Buffer = _StringCore._UTF8Chunk
 
       init(_ _core: _StringCore, _ _coreIndex: Int,
@@ -121,45 +130,12 @@ extension String {
         _sanityCheck(_coreIndex <= _core.count)
       }
 
-      /// Returns the next consecutive value after `self`.
-      ///
-      /// - Precondition: The next value is representable.
-      @warn_unused_result
-      public func successor() -> Index {
-        let currentUnit = UTF8.CodeUnit(truncatingBitPattern: _buffer)
-        let hiNibble = currentUnit >> 4
-        // Map the high nibble of the current code unit into the
-        // amount by which to increment the utf16 index.  Only when
-        // the high nibble is 1111 do we have a surrogate pair.
-        let u16Increments = Int(bitPattern:
-        // 1111 1110 1101 1100 1011 1010 1001 1000 0111 0110 0101 0100 0011 0010 0001 0000
-           0b10___01___01___01___00___00___00___00___01___01___01___01___01___01___01___01)
-        let increment = (u16Increments >> numericCast(hiNibble << 1)) & 0x3
-        let nextCoreIndex = _coreIndex &+ increment
-        let nextBuffer = Index._nextBuffer(after: _buffer)
-
-        // if the nextBuffer is non-empty, we have all we need
-        if _fastPath(nextBuffer != Index._emptyBuffer) {
-          return Index(_core, nextCoreIndex, nextBuffer)
-        }
-        // If the underlying UTF16 isn't exhausted, fill a new buffer
-        else if _fastPath(nextCoreIndex < _core.endIndex) {
-          let (_, freshBuffer) = _core._encodeSomeUTF8(from: nextCoreIndex)
-          return Index(_core, nextCoreIndex, freshBuffer)
-        }
-        else {
-          // Produce the endIndex
-          _precondition(
-            nextCoreIndex == _core.endIndex,
-            "Can't increment past endIndex of String.UTF8View")
-          return Index(_core, nextCoreIndex, nextBuffer)
-        }
-      }
-
       /// True iff the index is at the end of its view or if the next
       /// byte begins a new UnicodeScalar.
       internal var _isOnUnicodeScalarBoundary : Bool {
-        return UTF8._isValidUTF8(UInt32(truncatingBitPattern: _buffer)) || _isAtEnd
+        let buffer = UInt32(truncatingBitPattern: _buffer)
+        let (codePoint, _) = UTF8._decodeOne(buffer)
+        return codePoint != nil || _isAtEnd
       }
 
       /// True iff the index is at the end of its view
@@ -184,15 +160,17 @@ extension String {
         return (thisBuffer >> 8) | _bufferHiByte
       }
 
-      /// The underlying buffer we're presenting as UTF8
+      /// The underlying buffer we're presenting as UTF-8
       internal let _core: _StringCore
       /// The position of `self`, rounded up to the nearest unicode
-      /// scalar boundary, in the underlying UTF16.
+      /// scalar boundary, in the underlying UTF-16.
       internal let _coreIndex: Int
       /// If `self` is at the end of its `_core`, has the value `_endBuffer`.
       /// Otherwise, the low byte contains the value of
       internal let _buffer: Buffer
     }
+
+    public typealias IndexDistance = Int
 
     /// The position of the first code unit if the `String` is
     /// non-empty; identical to `endIndex` otherwise.
@@ -204,9 +182,45 @@ extension String {
     ///
     /// `endIndex` is not a valid argument to `subscript`, and is always
     /// reachable from `startIndex` by zero or more applications of
-    /// `successor()`.
+    /// `index(after:)`.
     public var endIndex: Index {
       return self._endIndex
+    }
+
+    /// Returns the next consecutive position after `i`.
+    ///
+    /// - Precondition: The next position is representable.
+    @warn_unused_result
+    public func index(after i: Index) -> Index {
+      // FIXME: swift-3-indexing-model: range check i?
+      let currentUnit = UTF8.CodeUnit(truncatingBitPattern: i._buffer)
+      let hiNibble = currentUnit >> 4
+      // Map the high nibble of the current code unit into the
+      // amount by which to increment the UTF-16 index.  Only when
+      // the high nibble is 1111 do we have a surrogate pair.
+      let u16Increments = Int(bitPattern:
+      // 1111 1110 1101 1100 1011 1010 1001 1000 0111 0110 0101 0100 0011 0010 0001 0000
+         0b10___01___01___01___00___00___00___00___01___01___01___01___01___01___01___01)
+      let increment = (u16Increments >> numericCast(hiNibble << 1)) & 0x3
+      let nextCoreIndex = i._coreIndex &+ increment
+      let nextBuffer = Index._nextBuffer(after: i._buffer)
+
+      // if the nextBuffer is non-empty, we have all we need
+      if _fastPath(nextBuffer != Index._emptyBuffer) {
+        return Index(i._core, nextCoreIndex, nextBuffer)
+      }
+      // If the underlying UTF16 isn't exhausted, fill a new buffer
+      else if _fastPath(nextCoreIndex < i._core.endIndex) {
+        let (_, freshBuffer) = i._core._encodeSomeUTF8(from: nextCoreIndex)
+        return Index(_core, nextCoreIndex, freshBuffer)
+      }
+      else {
+        // Produce the endIndex
+        _precondition(
+          nextCoreIndex == i._core.endIndex,
+          "Can't increment past endIndex of String.UTF8View")
+        return Index(_core, nextCoreIndex, nextBuffer)
+      }
     }
 
     /// Access the element at `position`.
@@ -214,7 +228,7 @@ extension String {
     /// - Precondition: `position` is a valid position in `self` and
     ///   `position != endIndex`.
     public subscript(position: Index) -> UTF8.CodeUnit {
-      let result: UTF8.CodeUnit = numericCast(position._buffer & 0xFF)
+      let result = UTF8.CodeUnit(truncatingBitPattern: position._buffer & 0xFF)
       _precondition(result != 0xFF, "cannot subscript using endIndex")
       return result
     }
@@ -224,7 +238,7 @@ extension String {
     /// - Complexity: O(1) unless bridging from Objective-C requires an
     ///   O(N) conversion.
     public subscript(bounds: Range<Index>) -> UTF8View {
-      return UTF8View(_core, bounds.startIndex, bounds.endIndex)
+      return UTF8View(_core, bounds.lowerBound, bounds.upperBound)
     }
 
     public var description: String {
@@ -246,7 +260,7 @@ extension String {
     }
   }
 
-  public var _contiguousUTF8: UnsafeMutablePointer<UTF8.CodeUnit> {
+  public var _contiguousUTF8: UnsafeMutablePointer<UTF8.CodeUnit>? {
     return _core.elementWidth == 1 ? _core.startASCII : nil
   }
 
@@ -261,6 +275,16 @@ extension String {
     result += utf8
     result.append(0)
     return result
+  }
+
+  internal func _withUnsafeBufferPointerToUTF8<R>(
+    _ body: @noescape (UnsafeBufferPointer<UTF8.CodeUnit>) throws -> R
+  ) rethrows -> R {
+    let ptr = _contiguousUTF8
+    if ptr != nil {
+      return try body(UnsafeBufferPointer(start: ptr, count: _core.count))
+    }
+    return try nulTerminatedUTF8.withUnsafeBufferPointer(body)
   }
 
   /// Construct the `String` corresponding to the given sequence of
@@ -281,6 +305,8 @@ extension String {
   public typealias UTF8Index = UTF8View.Index
 }
 
+// FIXME: swift-3-indexing-model: add complete set of forwards for Comparable 
+//        assuming String.UTF8View.Index continues to exist
 @warn_unused_result
 public func == (
   lhs: String.UTF8View.Index,
@@ -318,6 +344,17 @@ public func == (
   while true
 }
 
+@warn_unused_result
+public func < (
+  lhs: String.UTF8View.Index,
+  rhs: String.UTF8View.Index
+) -> Bool {
+  // FIXME: swift-3-indexing-model: tests.
+  // FIXME: swift-3-indexing-model: this implementation is wrong, it is just a
+  // temporary HACK.
+  return lhs._coreIndex < rhs._coreIndex
+}
+
 // Index conversions
 extension String.UTF8View.Index {
   internal init(_ core: _StringCore, _utf16Offset: Int) {
@@ -345,7 +382,7 @@ extension String.UTF8View.Index {
       // surrogate will be decoded as a single replacement character,
       // thus making the corresponding position valid in UTF8.
       if UTF16.isTrailSurrogate(utf16[utf16Index])
-        && UTF16.isLeadSurrogate(utf16[utf16Index.predecessor()]) {
+        && UTF16.isLeadSurrogate(utf16[utf16.index(before: utf16Index)]) {
         return nil
       }
     }
@@ -421,3 +458,4 @@ extension String.UTF8View : CustomPlaygroundQuickLookable {
     return .text(description)
   }
 }
+

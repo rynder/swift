@@ -36,7 +36,7 @@
 
 using namespace swift;
 
-STATISTIC(NumInstrSunk,   "Number of instructions sunk");
+STATISTIC(NumInstrSunk, "Number of instructions sunk");
 
 namespace {
 
@@ -67,13 +67,26 @@ public:
     if (II->isAllocatingStack() || II->isDeallocatingStack())
       return false;
 
+    // We don't sink open_existential_* instructions, because
+    // there may be some instructions depending on them, e.g.
+    // metatype_inst, etc. But this kind of dependency
+    // cannot be expressed in SIL yet.
+    switch (II->getKind()) {
+    default: break;
+    case ValueKind::OpenExistentialBoxInst:
+    case ValueKind::OpenExistentialRefInst:
+    case ValueKind::OpenExistentialAddrInst:
+    case ValueKind::OpenExistentialMetatypeInst:
+      return false;
+    }
+
     SILBasicBlock *CurrentBlock = II->getParent();
     SILBasicBlock *Dest = nullptr;
     unsigned InitialLoopDepth = LoopInfo->getLoopDepth(CurrentBlock);
 
     // TODO: We may want to delete debug instructions to allow us to sink more
     // instructions.
-    for (auto *Operand : II->getUses())  {
+    for (auto *Operand : II->getUses()) {
       SILInstruction *User = Operand->getUser();
 
       // Check if the instruction is already in the user's block.

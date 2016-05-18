@@ -12,22 +12,18 @@
 // RUN: rm -rf %t
 // RUN: mkdir -p %t
 //
-// RUN: %target-clang %S/Inputs/Mirror/Mirror.mm -c -o %t/Mirror.mm.o -g
-// RUN: %target-build-swift %s -I %S/Inputs/Mirror/ -Xlinker %t/Mirror.mm.o -o %t/Mirror
+// RUN: if [ %target-runtime == "objc" ]; \
+// RUN: then \
+// RUN:   %target-clang %S/Inputs/Mirror/Mirror.mm -c -o %t/Mirror.mm.o -g && \
+// RUN:   %target-build-swift %s -I %S/Inputs/Mirror/ -Xlinker %t/Mirror.mm.o -o %t/Mirror; \
+// RUN: else \
+// RUN:   %target-build-swift %s -o %t/Mirror; \
+// RUN: fi
 // RUN: %target-run %t/Mirror
 // REQUIRES: executable_test
 
-// XFAIL: linux
-
 import StdlibUnittest
 
-// Also import modules which are used by StdlibUnittest internally. This
-// workaround is needed to link all required libraries in case we compile
-// StdlibUnittest with -sil-serialize-all.
-import SwiftPrivate
-#if _runtime(_ObjC)
-import ObjectiveC
-#endif
 
 var mirrors = TestSuite("Mirrors")
 
@@ -56,21 +52,21 @@ mirrors.test("RandomAccessStructure") {
 
 let letters = "abcdefghijklmnopqrstuvwxyz "
 
-func find(substring: String, within domain: String) -> String.Index? {
+func find(_ substring: String, within domain: String) -> String.Index? {
   let domainCount = domain.characters.count
   let substringCount = substring.characters.count
 
   if (domainCount < substringCount) { return nil }
   var sliceStart = domain.startIndex
-  var sliceEnd = domain.startIndex.advanced(by: substringCount)
+  var sliceEnd = domain.index(sliceStart, offsetBy: substringCount)
   var i = 0
   while true {
     if domain[sliceStart..<sliceEnd] == substring {
       return sliceStart
     }
     if i == domainCount - substringCount { break }
-    sliceStart = sliceStart.successor()
-    sliceEnd = sliceEnd.successor()
+    sliceStart = domain.index(after: sliceStart)
+    sliceEnd = domain.index(after: sliceEnd)
     i += 1
   }
   return nil
@@ -171,7 +167,7 @@ mirrors.test("Legacy") {
   let mb = Mirror(reflecting: B())
   
   func expectBMirror(
-    mb: Mirror,   stackTrace: SourceLocStack = SourceLocStack(),
+    _ mb: Mirror, stackTrace: SourceLocStack = SourceLocStack(),
     file: String = #file, line: UInt = #line
   ) {
     expectTrue(mb.subjectType == B.self,
@@ -243,7 +239,7 @@ mirrors.test("Class/Root/superclass:.generated") {
     var b: String = "two"
     var customMirror: Mirror {
       return Mirror(
-        self, children: [ "bee": b ], ancestorRepresentation: .generated)
+        self, children: ["bee": b], ancestorRepresentation: .generated)
     }
   }
   
@@ -260,7 +256,7 @@ mirrors.test("class/Root/superclass:<default>") {
   class C : CustomReflectable {
     var c: UInt = 3
     var customMirror: Mirror {
-      return Mirror(self, children: [ "sea": c + 1 ])
+      return Mirror(self, children: ["sea": c + 1])
     }
   }
   
@@ -299,7 +295,7 @@ mirrors.test("class/UncustomizedSuper/Synthesized/Implicit") {
   class B : A, CustomReflectable {
     var b: UInt = 42
     var customMirror: Mirror {
-      return Mirror(self, children: [ "bee": b ])
+      return Mirror(self, children: ["bee": b])
     }
   }
 
@@ -319,7 +315,7 @@ mirrors.test("class/UncustomizedSuper/Synthesized/Explicit") {
     var b: UInt = 42
     var customMirror: Mirror {
       return Mirror(
-        self, children: [ "bee": b ], ancestorRepresentation: .generated)
+        self, children: ["bee": b], ancestorRepresentation: .generated)
     }
   }
 
@@ -336,7 +332,7 @@ mirrors.test("class/CustomizedSuper/Synthesized") {
   class A : CustomReflectable {
     var a: Int = 1
     var customMirror: Mirror {
-      return Mirror(self, children: [ "aye": a ])
+      return Mirror(self, children: ["aye": a])
     }
   }
 
@@ -348,7 +344,7 @@ mirrors.test("class/CustomizedSuper/Synthesized") {
     // rare cases, ancestorRepresentation: .Suppressed.  However, it
     // has an expected behavior, which we test here.
     override var customMirror: Mirror {
-      return Mirror(self, children: [ "bee": b ])
+      return Mirror(self, children: ["bee": b])
     }
   }
 
@@ -361,6 +357,7 @@ mirrors.test("class/CustomizedSuper/Synthesized") {
   }
 }
 
+#if _runtime(_ObjC)
 import Foundation
 
 //===--- ObjC Base Classes ------------------------------------------------===//
@@ -394,7 +391,7 @@ mirrors.test("class/ObjCUncustomizedSuper/Synthesized/Implicit") {
   class B : A, CustomReflectable {
     var b: UInt = 42
     var customMirror: Mirror {
-      return Mirror(self, children: [ "bee": b ])
+      return Mirror(self, children: ["bee": b])
     }
   }
 
@@ -416,7 +413,7 @@ mirrors.test("class/ObjCUncustomizedSuper/Synthesized/Explicit") {
     var b: UInt = 42
     var customMirror: Mirror {
       return Mirror(
-        self, children: [ "bee": b ], ancestorRepresentation: .generated)
+        self, children: ["bee": b], ancestorRepresentation: .generated)
     }
   }
 
@@ -435,7 +432,7 @@ mirrors.test("class/ObjCCustomizedSuper/Synthesized") {
   class A : NSDateFormatter, CustomReflectable {
     var a: Int = 1
     var customMirror: Mirror {
-      return Mirror(self, children: [ "aye": a ])
+      return Mirror(self, children: ["aye": a])
     }
   }
 
@@ -447,7 +444,7 @@ mirrors.test("class/ObjCCustomizedSuper/Synthesized") {
     // rare cases, ancestorRepresentation: .Suppressed.  However, it
     // has an expected behavior, which we test here.
     override var customMirror: Mirror {
-      return Mirror(self, children: [ "bee": b ])
+      return Mirror(self, children: ["bee": b])
     }
   }
 
@@ -468,6 +465,7 @@ mirrors.test("class/ObjCCustomizedSuper/Synthesized") {
     }
   }
 }
+#endif // _runtime(_ObjC)
 
 //===--- Suppressed Superclass Mirrors ------------------------------------===//
 mirrors.test("Class/Root/NoSuperclassMirror") {
@@ -475,7 +473,7 @@ mirrors.test("Class/Root/NoSuperclassMirror") {
     var b: String = "two"
     var customMirror: Mirror {
       return Mirror(
-        self, children: [ "bee": b ], ancestorRepresentation: .suppressed)
+        self, children: ["bee": b], ancestorRepresentation: .suppressed)
     }
   }
   
@@ -493,7 +491,7 @@ mirrors.test("class/UncustomizedSuper/NoSuperclassMirror") {
     var b: UInt = 42
     var customMirror: Mirror {
       return Mirror(
-        self, children: [ "bee": b ], ancestorRepresentation: .suppressed)
+        self, children: ["bee": b], ancestorRepresentation: .suppressed)
     }
   }
 
@@ -506,7 +504,7 @@ mirrors.test("class/CustomizedSuper/NoSuperclassMirror") {
   class A : CustomReflectable {
     var a: Int = 1
     var customMirror: Mirror {
-      return Mirror(self, children: [ "aye": a ])
+      return Mirror(self, children: ["aye": a])
     }
   }
 
@@ -514,7 +512,7 @@ mirrors.test("class/CustomizedSuper/NoSuperclassMirror") {
     var b: UInt = 42
     override var customMirror: Mirror {
       return Mirror(
-        self, children: [ "bee": b ], ancestorRepresentation: .suppressed)
+        self, children: ["bee": b], ancestorRepresentation: .suppressed)
     }
   }
 
@@ -528,7 +526,7 @@ mirrors.test("class/CustomizedSuper/SuperclassCustomMirror/Direct") {
   class A : CustomReflectable {
     var a: Int = 1
     var customMirror: Mirror {
-      return Mirror(self, children: [ "aye": a ])
+      return Mirror(self, children: ["aye": a])
     }
   }
 
@@ -538,7 +536,7 @@ mirrors.test("class/CustomizedSuper/SuperclassCustomMirror/Direct") {
     override var customMirror: Mirror {
       return Mirror(
         self,
-        children: [ "bee": b ],
+        children: ["bee": b],
         ancestorRepresentation: .customized({ super.customMirror }))
     }
   }
@@ -556,7 +554,7 @@ mirrors.test("class/CustomizedSuper/SuperclassCustomMirror/Indirect") {
   class A : CustomReflectable {
     var a: Int = 1
     var customMirror: Mirror {
-      return Mirror(self, children: [ "aye": a ])
+      return Mirror(self, children: ["aye": a])
     }
   }
 
@@ -570,7 +568,7 @@ mirrors.test("class/CustomizedSuper/SuperclassCustomMirror/Indirect") {
     override var customMirror: Mirror {
       return Mirror(
         self,
-        children: [ "bee": b ],
+        children: ["bee": b],
         ancestorRepresentation: .customized({ super.customMirror }))
     }
   }
@@ -597,7 +595,7 @@ mirrors.test("class/CustomizedSuper/SuperclassCustomMirror/Indirect2") {
     var a: Int = 1
     var customMirror: Mirror {
       return Mirror(
-        self, children: [ "aye": a ])
+        self, children: ["aye": a])
     }
   }
 
@@ -611,7 +609,7 @@ mirrors.test("class/CustomizedSuper/SuperclassCustomMirror/Indirect2") {
     override var customMirror: Mirror {
       return Mirror(
         self,
-        children: [ "bee": b ],
+        children: ["bee": b],
         ancestorRepresentation: .customized({ super.customMirror }))
     }
   }
@@ -631,7 +629,7 @@ mirrors.test("class/Cluster") {
     var a: Int = 1
     var customMirror: Mirror {
       return Mirror(
-        self, children: [ "aye": a ])
+        self, children: ["aye": a])
     }
   }
 
@@ -724,7 +722,10 @@ mirrors.test("PlaygroundQuickLook") {
   struct X {}
   switch PlaygroundQuickLook(reflecting: X()) {
   case .text(let text):
+#if _runtime(_ObjC)
+// FIXME: Enable if non-objc hasSuffix is implemented.
     expectTrue(text.hasSuffix(".(X #1)()"), text)
+#endif
   default:
     expectTrue(false)
   }
@@ -737,6 +738,36 @@ mirrors.test("PlaygroundQuickLook") {
   }
 }
 
+class Parent {}
+
+extension Parent : _DefaultCustomPlaygroundQuickLookable {
+  var _defaultCustomPlaygroundQuickLook: PlaygroundQuickLook {
+    return .text("base")
+  }
+}
+
+class Child : Parent { }
+
+class FancyChild : Parent, CustomPlaygroundQuickLookable {
+  var customPlaygroundQuickLook: PlaygroundQuickLook {
+    return .text("child")
+  }
+}
+
+mirrors.test("_DefaultCustomPlaygroundQuickLookable") {
+  // testing the workaround for custom quicklookables in subclasses
+  switch PlaygroundQuickLook(reflecting: Child()) {
+  case .text("base"): break
+  default: expectUnreachable("Base custom quicklookable was expected")
+  }
+
+  switch PlaygroundQuickLook(reflecting: FancyChild()) {
+  case .text("child"): break
+  default: expectUnreachable("FancyChild custom quicklookable was expected")
+  }
+}
+
+#if _runtime(_ObjC)
 import MirrorObjC
 mirrors.test("ObjC") {
   // Some Foundation classes lie about their ivars, which would crash
@@ -744,6 +775,7 @@ mirrors.test("ObjC") {
   // Objective-C classes from the default mirror implementation.
   expectEqual(0, Mirror(reflecting: HasIVars()).children.count)
 }
+#endif
 
 mirrors.test("String.init") {
   expectEqual("42", String(42))

@@ -389,17 +389,30 @@ getSubstitutionsForCallee(SILModule &M, CanSILFunctionType GenCalleeType,
   CanSILFunctionType AIGenCalleeType =
       AI.getCallee()->getType().castTo<SILFunctionType>();
 
-  CanType AISelfClass = AIGenCalleeType->getSelfParameter().getType();
-
   unsigned NextMethodParamIdx = 0;
   unsigned NumMethodParams = 0;
   if (AIGenCalleeType->isPolymorphic()) {
-    NextMethodParamIdx = 0;
-    // Generic parameters of the method start after generic parameters
-    // of the instance class.
-    if (auto AISelfClassSig =
-            AISelfClass.getClassBound()->getGenericSignature()) {
-      NextMethodParamIdx = AISelfClassSig->getGenericParams().size();
+    NextMethodParamIdx = AISubs.size();
+    if (auto AIMethodSig = AI.getOrigCalleeType()->getGenericSignature()) {
+      // Find out if the apply instruction contains any substitutions for
+      // a method itself, not for the class where it is declared.
+      // If there are any such parameters, remember where they start
+      // in the substitutions list.
+      auto InnermostGenericParams = AIMethodSig->getInnermostGenericParams();
+      auto InnermostGenericParamsNum = InnermostGenericParams.size();
+      if (InnermostGenericParamsNum != AIMethodSig->getGenericParams().size()) {
+        auto Depth = InnermostGenericParams[0]->getDepth();
+        for (NextMethodParamIdx = 0; NextMethodParamIdx < AISubs.size();
+             ++NextMethodParamIdx) {
+          if (auto SubstTy = dyn_cast<SubstitutedType>(
+                  AISubs[NextMethodParamIdx].getReplacement().getPointer())) {
+            if (auto *GenParamTy = dyn_cast<GenericTypeParamType>(
+                    SubstTy->getOriginal().getPointer()))
+              if (GenParamTy->getDepth() == Depth)
+                break;
+          }
+        }
+      }
     }
     NumMethodParams = AISubs.size() - NextMethodParamIdx;
   }
@@ -428,16 +441,20 @@ getSubstitutionsForCallee(SILModule &M, CanSILFunctionType GenCalleeType,
   return Subs;
 }
 
-static SILFunction *getTargetClassMethod(SILModule &M,
+SILFunction *swift::getTargetClassMethod(SILModule &M,
                                          SILType ClassOrMetatypeType,
-                                         SILDeclRef Member) {
+                                         MethodInst *MI) {
+  assert((isa<ClassMethodInst>(MI) || isa<WitnessMethodInst>(MI) ||
+          isa<SuperMethodInst>(MI)) &&
+         "Only class_method and witness_method instructions are supported");
+
+  SILDeclRef Member = MI->getMember();
   if (ClassOrMetatypeType.is<MetatypeType>())
     ClassOrMetatypeType = ClassOrMetatypeType.getMetatypeInstanceType(M);
 
   auto *CD = ClassOrMetatypeType.getClassOrBoundGenericClass();
   return M.lookUpFunctionInVTable(CD, Member);
 }
-
 
 /// \brief Check if it is possible to devirtualize an Apply instruction
 /// and a class member obtained using the class_method instruction into
@@ -460,7 +477,7 @@ bool swift::canDevirtualizeClassMethod(FullApplySite AI,
   auto *MI = cast<MethodInst>(AI.getCallee());
 
   // Find the implementation of the member which should be invoked.
-  auto *F = getTargetClassMethod(Mod, ClassOrMetatypeType, MI->getMember());
+  auto *F = getTargetClassMethod(Mod, ClassOrMetatypeType, MI);
 
   // If we do not find any such function, we have no function to devirtualize
   // to... so bail.
@@ -470,45 +487,57 @@ bool swift::canDevirtualizeClassMethod(FullApplySite AI,
     return false;
   }
 
+  if (!F->shouldOptimize()) {
+    // Do not consider functions that should not be optimized.
+    DEBUG(llvm::dbgs() << "        FAIL: Could not optimize function "
+                       << " because it is marked no-opt: " << F->getName()
+                       << "\n");
+    return false;
+  }
+
   if (AI.getFunction()->isFragile()) {
     // function_ref inside fragile function cannot reference a private or
     // hidden symbol.
-    if (!(F->isFragile() || isValidLinkageForFragileRef(F->getLinkage()) ||
-          F->isExternalDeclaration()))
+    if (!F->hasValidLinkageForFragileRef())
       return false;
   }
 
+  // Type of the actual function to be called.
   CanSILFunctionType GenCalleeType = F->getLoweredFunctionType();
 
-  auto Subs = getSubstitutionsForCallee(Mod, GenCalleeType,
-                                        ClassOrMetatypeType, AI);
+  // Type of the actual function to be called with substitutions applied.
+  CanSILFunctionType SubstCalleeType = GenCalleeType;
 
   // For polymorphic functions, bail if the number of substitutions is
   // not the same as the number of expected generic parameters.
   if (GenCalleeType->isPolymorphic()) {
+    // First, find proper list of substitutions for the concrete
+    // method to be called.
+    auto Subs = getSubstitutionsForCallee(Mod, GenCalleeType,
+                                          ClassOrMetatypeType, AI);
+
     auto GenericSig = GenCalleeType->getGenericSignature();
     // Get the number of expected generic parameters, which
     // is a sum of the number of explicit generic parameters
     // and the number of their recursive member types exposed
     // through protocol requirements.
     auto DepTypes = GenericSig->getAllDependentTypes();
-    unsigned ExpectedGenParamsNum = 0;
+    unsigned ExpectedSubsNum = 0;
 
     for (auto DT: DepTypes) {
       (void)DT;
-      ExpectedGenParamsNum++;
+      ExpectedSubsNum++;
     }
 
-    if (ExpectedGenParamsNum != Subs.size())
+    if (ExpectedSubsNum != Subs.size()) {
       return false;
+    }
+
+    SubstCalleeType =
+        GenCalleeType->substGenericArgs(Mod, Mod.getSwiftModule(), Subs);
   }
 
   // Check if the optimizer knows how to cast the return type.
-  CanSILFunctionType SubstCalleeType = GenCalleeType;
-  if (GenCalleeType->isPolymorphic())
-    SubstCalleeType =
-        GenCalleeType->substGenericArgs(Mod, Mod.getSwiftModule(), Subs);
-
   SILType ReturnType = SubstCalleeType->getSILResult();
 
   if (!canCastValueToABICompatibleType(Mod, ReturnType, AI.getType()))
@@ -530,7 +559,7 @@ DevirtualizationResult swift::devirtualizeClassMethod(FullApplySite AI,
   SILModule &Mod = AI.getModule();
   auto *MI = cast<MethodInst>(AI.getCallee());
   auto ClassOrMetatypeType = ClassOrMetatype->getType();
-  auto *F = getTargetClassMethod(Mod, ClassOrMetatypeType, MI->getMember());
+  auto *F = getTargetClassMethod(Mod, ClassOrMetatypeType, MI);
 
   CanSILFunctionType GenCalleeType = F->getLoweredFunctionType();
 
@@ -652,7 +681,7 @@ DevirtualizationResult swift::devirtualizeClassMethod(FullApplySite AI,
       B.createBranch(NewAI.getLoc(), NormalBB, { ResultValue });
     } else if (ResultCastRequired) {
       // Update all original uses by the new value.
-      for(auto *Use: OriginalResultUses) {
+      for (auto *Use: OriginalResultUses) {
         Use->set(ResultValue);
       }
     }
@@ -816,6 +845,13 @@ DevirtualizationResult swift::tryDevirtualizeWitnessMethod(ApplySite AI) {
 
   if (!F)
     return std::make_pair(nullptr, FullApplySite());
+
+  if (AI.getFunction()->isFragile()) {
+    // function_ref inside fragile function cannot reference a private or
+    // hidden symbol.
+    if (!F->hasValidLinkageForFragileRef())
+      return std::make_pair(nullptr, FullApplySite());
+  }
 
   auto Result = devirtualizeWitnessMethod(AI, F, Subs);
   return std::make_pair(Result.getInstruction(), Result);

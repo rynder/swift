@@ -9,7 +9,7 @@
 import AppKit
 import NotificationCenter
 
-func testInstanceTypeFactoryMethod(queen: Bee) {
+func testInstanceTypeFactoryMethod(_ queen: Bee) {
   _ = Hive(queen: queen)
   
   _ = NSObjectFactory() // okay, prefers init method
@@ -74,16 +74,16 @@ func testFactoryWithLaterIntroducedInit() {
   _ = NSHavingUnavailableFactoryAndUnavailableConvenienceInit(flam:5) // expected-error {{'init(flam:)' is unavailable: ConvenienceInit}}
 }
 
-func testNSErrorFactoryMethod(path: String) throws {
+func testNSErrorFactoryMethod(_ path: String) throws {
   _ = try NSString(contentsOfFile: path)
 }
 
-func testNonInstanceTypeFactoryMethod(s: String) {
+func testNonInstanceTypeFactoryMethod(_ s: String) {
   _ = NSObjectFactory(string: s) // expected-error{{argument labels '(string:)' do not match any available overloads}}
   // expected-note @-1 {{(integer: Int), (double: Double), (float: Float)}}
 }
 
-func testUseOfFactoryMethod(queen: Bee) {
+func testUseOfFactoryMethod(_ queen: Bee) {
   _ = Hive.withQueen(queen) // expected-error{{'withQueen' is unavailable: use object construction 'Hive(queen:)'}}
 }
 
@@ -98,16 +98,16 @@ func testFactoryMethodBlacklist() {
 
 func test17261609() {
   _ = NSDecimalNumber(mantissa:1, exponent:1, isNegative:true)
-  NSDecimalNumber.withMantissa(1, exponent:1, isNegative:true) // expected-error{{'withMantissa(_:exponent:isNegative:)' is unavailable: use object construction 'NSDecimalNumber(mantissa:exponent:isNegative:)'}}
+  _ = NSDecimalNumber.withMantissa(1, exponent:1, isNegative:true) // expected-error{{'withMantissa(_:exponent:isNegative:)' is unavailable: use object construction 'NSDecimalNumber(mantissa:exponent:isNegative:)'}}
 }
 
 func testURL() {
   let url = NSURL(string: "http://www.llvm.org")
-  NSURL.withString("http://www.llvm.org") // expected-error{{'withString' is unavailable: use object construction 'NSURL(string:)'}}
+  _ = NSURL.withString("http://www.llvm.org") // expected-error{{'withString' is unavailable: use object construction 'NSURL(string:)'}}
 
   NSURLRequest(string: "http://www.llvm.org") // expected-warning{{unused}}
   NSURLRequest(url: url) // expected-warning{{unused}}
 
-  NSURLRequest.withString("http://www.llvm.org") // expected-error{{'withString' is unavailable: use object construction 'NSURLRequest(string:)'}}
-  NSURLRequest.withURL(url) // expected-error{{'withURL' is unavailable: use object construction 'NSURLRequest(url:)'}}
+  _ = NSURLRequest.withString("http://www.llvm.org") // expected-error{{'withString' is unavailable: use object construction 'NSURLRequest(string:)'}}
+  _ = NSURLRequest.withURL(url) // expected-error{{'withURL' is unavailable: use object construction 'NSURLRequest(url:)'}}
 }

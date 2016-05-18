@@ -32,6 +32,7 @@ REPOSITORIES = {
     'cmark': 'apple/swift-cmark',
     'llbuild': 'apple/swift-llbuild',
     'swiftpm': 'apple/swift-package-manager',
+    'compiler-rt': 'apple/swift-compiler-rt',
     'swift-corelibs-xctest': 'apple/swift-corelibs-xctest',
     'swift-corelibs-foundation': 'apple/swift-corelibs-foundation',
     'swift-corelibs-libdispatch': 'apple/swift-corelibs-libdispatch',
@@ -50,6 +51,21 @@ NEXT_BRANCHES = {
     'swift-corelibs-foundation': 'master',
     'swift-corelibs-libdispatch': 'master',
     'swift-integration-tests': 'master',
+}
+
+SWIFT_3_0_PREVIEW_1_BRANCHES = {
+    'llvm': 'swift-3.0-branch',
+    'clang': 'swift-3.0-branch',
+    'swift': 'swift-3.0-preview-1-branch',
+    'lldb': 'swift-3.0-preview-1-branch',
+    'cmark': 'swift-3.0-preview-1-branch',
+    'llbuild': 'swift-3.0-preview-1-branch',
+    'swiftpm': 'swift-3.0-preview-1-branch',
+    'swift-corelibs-xctest': 'swift-3.0-preview-1-branch',
+    'swift-corelibs-foundation': 'swift-3.0-preview-1-branch',
+    'swift-corelibs-libdispatch': 'swift-3.0-preview-1-branch',
+    'swift-integration-tests': 'swift-3.0-preview-1-branch',
+    'compiler-rt': 'swift-3.0-branch',
 }
 
 
@@ -88,13 +104,17 @@ def obtain_additional_swift_sources(
                 else:
                     remote = "https://github.com/" + repo + '.git'
                 if skip_history:
-                    check_call(['git', 'clone', '--depth', '1', remote,
-                                dir_name])
+                    check_call(['git', 'clone', '--recursive', '--depth', '1',
+                                remote, dir_name])
                 else:
-                    check_call(['git', 'clone', remote, dir_name])
+                    check_call(['git', 'clone', '--recursive', remote,
+                                dir_name])
                 if branch:
                     if branch == "stable-next" or branch == "master-next":
                         repo_branch = NEXT_BRANCHES[dir_name]
+                    elif branch == "swift-3.0-branch" or \
+                            branch == "swift-3.0-preview-1-branch":
+                        repo_branch = SWIFT_3_0_PREVIEW_1_BRANCHES[dir_name]
                     else:
                         repo_branch = branch
                     src_path = SWIFT_SOURCE_ROOT + "/" + dir_name + "/" + \
@@ -151,6 +171,9 @@ By default, updates your checkouts of Swift, SourceKit, LLDB, and SwiftPM.""")
         if branch:
             if branch == "stable-next" or branch == "master-next":
                 repo_branch = NEXT_BRANCHES[dir_name]
+            elif branch == "swift-3.0-branch" or \
+                    branch == "swift-3.0-preview-1-branch":
+                repo_branch = SWIFT_3_0_PREVIEW_1_BRANCHES[dir_name]
 
         update_working_copy(os.path.join(SWIFT_SOURCE_ROOT, dir_name),
                             repo_branch)

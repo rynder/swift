@@ -1590,8 +1590,6 @@ void PatternMatchEmission::emitIsDispatch(ArrayRef<RowToSpecialize> rows,
   CanType sourceType = rows[0].Pattern->getType()->getCanonicalType();
   CanType targetType = getTargetType(rows[0]);
 
-  SGF.checkForImportedUsedConformances(targetType);
-
   // Make any abstraction modifications necessary for casting.
   SmallVector<ConsumableManagedValue, 4> borrowedValues;
   ConsumableManagedValue operand =
@@ -2267,7 +2265,7 @@ void SILGenFunction::emitSwitchStmt(SwitchStmt *S) {
             for (auto cmv : argArray) {
               if (cmv.getValue() == value) {
                 if (cmv.hasCleanup())
-                  B.createRetainValue(CurrentSILLoc, value);
+                  B.createRetainValue(CurrentSILLoc, value, Atomicity::Atomic);
                 break;
               }
             }

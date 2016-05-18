@@ -12,20 +12,12 @@
 // RUN: %target-run-simple-swift
 // REQUIRES: executable_test
 
-// FIXME: rdar://problem/19648117 Needs splitting objc parts out
-// XFAIL: linux
-
 import StdlibUnittest
 
-// Also import modules which are used by StdlibUnittest internally. This
-// workaround is needed to link all required libraries in case we compile
-// StdlibUnittest with -sil-serialize-all.
-import SwiftPrivate
-#if _runtime(_ObjC)
-import ObjectiveC
-#endif
 
+#if _runtime(_ObjC)
 import Foundation
+#endif
 
 // Check that `NonObjectiveCBase` can be subclassed and the subclass can be
 // created.
@@ -73,7 +65,7 @@ struct CountAndCapacity {
 // elements, interleaved with garbage, as a simple way of catching
 // potential bugs.
 final class TestManagedBuffer<T> : ManagedBuffer<CountAndCapacity, T> {
-  class func create(capacity: Int) -> TestManagedBuffer {
+  class func create(_ capacity: Int) -> TestManagedBuffer {
     let r = super.create(minimumCapacity: capacity) {
       CountAndCapacity(
         count: LifetimeTracked(0), capacity: $0.capacity)
@@ -111,7 +103,7 @@ final class TestManagedBuffer<T> : ManagedBuffer<CountAndCapacity, T> {
     }
   }
   
-  func append(x: T) {
+  func append(_ x: T) {
     let count = self.count
     precondition(count + 2 <= myCapacity)
     
@@ -144,17 +136,17 @@ class MyBuffer<T> {
 var tests = TestSuite("ManagedBuffer")
 
 tests.test("basic") {
-  if true {
+  do {
     let s = TestManagedBuffer<LifetimeTracked>.create(0)
     expectEqual(1, LifetimeTracked.instances)
   }
   
   expectEqual(0, LifetimeTracked.instances)
-  if true {
+  do {
     let s = TestManagedBuffer<LifetimeTracked>.create(10)
     expectEqual(0, s.count)
     expectLE(10, s.myCapacity)
-    expectGE(12, s.myCapacity)  // allow some over-allocation but not too much
+    expectGE(13, s.myCapacity)  // allow some over-allocation but not too much
     
     expectEqual(1, LifetimeTracked.instances)
     for i in 1..<6 {
@@ -198,7 +190,7 @@ tests.test("ManagedBufferPointer/SizeValidation/MyBuffer") {
 tests.test("ManagedBufferPointer") {
   typealias Manager = ManagedBufferPointer<CountAndCapacity, LifetimeTracked>
 
-  if true {
+  do {
     var mgr = Manager(
       bufferClass: TestManagedBuffer<LifetimeTracked>.self,
       minimumCapacity: 10
@@ -269,8 +261,10 @@ tests.test("isUniquelyReferencedNonObjC") {
   var s2 = s
   expectFalse(isUniquelyReferencedNonObjC(&s))
   expectFalse(isUniquelyReferencedNonObjC(&s2))
+#if _runtime(_ObjC)
   var s3 = NSArray()
   expectFalse(isUniquelyReferencedNonObjC(&s3))
+#endif
   _fixLifetime(s)
   _fixLifetime(s2)
 }

@@ -20,8 +20,8 @@ func makeDictionary() -> [Int: Int] {
 }
 
 @inline(never)
-public func run_DictionaryLiteral(N: Int) {
+public func run_DictionaryLiteral(_ N: Int) {
   for _ in 1...10000*N {
-      makeDictionary()
+    _ = makeDictionary()
   }
 }

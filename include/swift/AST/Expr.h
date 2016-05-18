@@ -301,6 +301,16 @@ class alignas(8) Expr {
   enum { NumCollectionUpcastConversionExprBits = NumExprBits + 1 };
   static_assert(NumCollectionUpcastConversionExprBits <= 32, "fits in an unsigned");
 
+  class ObjCSelectorExprBitfields {
+    friend class ObjCSelectorExpr;
+    unsigned : NumExprBits;
+
+    /// The selector kind.
+    unsigned SelectorKind : 2;
+  };
+  enum { NumObjCSelectorExprBits = NumExprBits + 2 };
+  static_assert(NumObjCSelectorExprBits <= 32, "fits in an unsigned");
+
 protected:
   union {
     ExprBitfields ExprBits;
@@ -322,6 +332,7 @@ protected:
     CheckedCastExprBitfields CheckedCastExprBits;
     CollectionUpcastConversionExprBitfields CollectionUpcastConversionExprBits;
     TupleShuffleExprBitfields TupleShuffleExprBits;
+    ObjCSelectorExprBitfields ObjCSelectorExprBits;
   };
 
 private:
@@ -831,27 +842,31 @@ public:
 };
 
 // ObjectLiteralExpr - An expression of the form
-// '[#Color(red: 1, blue: 0, green: 0, alpha: 1)#]' with a name and a list
+// '#colorLiteral(red: 1, blue: 0, green: 0, alpha: 1)' with a name and a list
 // argument. The components of the list argument are meant to be themselves
 // constant.
 class ObjectLiteralExpr : public LiteralExpr {
-  Identifier Name;
+public:
+  /// The kind of object literal.
+  enum LiteralKind : unsigned {
+#define POUND_OBJECT_LITERAL(Name, Desc, Proto) Name,
+#include "swift/Parse/Tokens.def"    
+  };
+
+private:
+  LiteralKind LitKind;
   Expr *Arg;
   Expr *SemanticExpr;
-
-  SourceLoc LLitLoc;
-  SourceLoc NameLoc;
-  SourceLoc RLitLoc;
+  SourceLoc PoundLoc;
 
 public:
-  ObjectLiteralExpr(SourceLoc LLitLoc, Identifier Name, SourceLoc NameLoc,
-                    Expr *Arg, SourceLoc RLitLoc, bool implicit = false)
+  ObjectLiteralExpr(SourceLoc PoundLoc, LiteralKind LitKind,
+                    Expr *Arg, bool implicit = false)
     : LiteralExpr(ExprKind::ObjectLiteral, implicit), 
-      Name(Name), Arg(Arg), SemanticExpr(nullptr),
-      LLitLoc(LLitLoc), NameLoc(NameLoc), RLitLoc(RLitLoc) {}
+      LitKind(LitKind), Arg(Arg), SemanticExpr(nullptr),
+      PoundLoc(PoundLoc) {}
 
-  Identifier getName() const { return Name; }
-  SourceLoc getNameLoc() const { return NameLoc; }
+  LiteralKind getLiteralKind() const { return LitKind; }
 
   Expr *getArg() const { return Arg; }
   void setArg(Expr *arg) { Arg = arg; }
@@ -859,8 +874,15 @@ public:
   Expr *getSemanticExpr() const { return SemanticExpr; }
   void setSemanticExpr(Expr *expr) { SemanticExpr = expr; }
 
-  SourceLoc getSourceLoc() const { return NameLoc; }
-  SourceRange getSourceRange() const { return SourceRange(LLitLoc, RLitLoc); }
+  SourceLoc getSourceLoc() const { return PoundLoc; }
+  SourceRange getSourceRange() const { 
+    return SourceRange(PoundLoc, Arg->getEndLoc());
+  }
+
+  /// Return the string form of the literal name.
+  StringRef getLiteralKindRawName() const;
+
+  StringRef getLiteralKindPlainName() const;
 
   static bool classof(const Expr *E) {
     return E->getKind() == ExprKind::ObjectLiteral;
@@ -2258,6 +2280,17 @@ public:
   }
 };
 
+/// Construct an unevaluated instance of the underlying metatype.
+class UnevaluatedInstanceExpr : public ImplicitConversionExpr {
+public:
+  UnevaluatedInstanceExpr(Expr *subExpr, Type ty)
+    : ImplicitConversionExpr(ExprKind::UnevaluatedInstance, subExpr, ty) {}
+
+  static bool classof(const Expr *E) {
+    return E->getKind() == ExprKind::UnevaluatedInstance;
+  }
+};
+
 /// TupleShuffleExpr - This represents a permutation of a tuple value to a new
 /// tuple type.  The expression's type is known to be a tuple type.
 ///
@@ -2972,7 +3005,8 @@ public:
 /// when a scalar expression is converted to @autoclosure function type.
 /// For example:
 /// \code
-///   @autoclosure var x : () -> Int = 4
+///   func f(x : @autoclosure () -> Int)
+///   f(42)  // AutoclosureExpr convert from Int to ()->Int
 /// \endcode
 class AutoClosureExpr : public AbstractClosureExpr {
   BraceStmt *Body;
@@ -3489,6 +3523,47 @@ public:
   }
 };
 
+/// \brief Represents two expressions joined by the arrow operator '->', which
+/// may be preceded by the 'throws' keyword. Currently this only exists to be
+/// transformed into a FunctionTypeRepr by simplifyTypeExpr() in Sema.
+class ArrowExpr : public Expr {
+  SourceLoc ThrowsLoc;
+  SourceLoc ArrowLoc;
+  Expr *Args;
+  Expr *Result;
+public:
+  ArrowExpr(Expr *Args, SourceLoc ThrowsLoc, SourceLoc ArrowLoc, Expr *Result)
+    : Expr(ExprKind::Arrow, /*implicit=*/false, Type()),
+      ThrowsLoc(ThrowsLoc), ArrowLoc(ArrowLoc), Args(Args), Result(Result)
+  { }
+
+  ArrowExpr(SourceLoc ThrowsLoc, SourceLoc ArrowLoc)
+    : Expr(ExprKind::Arrow, /*implicit=*/false, Type()),
+      ThrowsLoc(ThrowsLoc), ArrowLoc(ArrowLoc), Args(nullptr), Result(nullptr)
+  { }
+
+  Expr *getArgsExpr() const { return Args; }
+  void setArgsExpr(Expr *E) { Args = E; }
+  Expr *getResultExpr() const { return Result; }
+  void setResultExpr(Expr *E) { Result = E; }
+  SourceLoc getThrowsLoc() const { return ThrowsLoc; }
+  SourceLoc getArrowLoc() const { return ArrowLoc; }
+  bool isFolded() const { return Args != nullptr && Result != nullptr; }
+
+  SourceLoc getSourceLoc() const { return ArrowLoc; }
+  SourceLoc getStartLoc() const {
+    return isFolded() ? Args->getStartLoc() :
+           ThrowsLoc.isValid() ? ThrowsLoc : ArrowLoc;
+  }
+  SourceLoc getEndLoc() const {
+    return isFolded() ? Result->getEndLoc() : ArrowLoc;
+  }
+
+  static bool classof(const Expr *E) {
+    return E->getKind() == ExprKind::Arrow;
+  }
+};
+
 /// \brief Represents the rebinding of 'self' in a constructor that calls out
 /// to another constructor. The result of the subexpression is assigned to
 /// 'self', and the expression returns void.
@@ -3700,29 +3775,84 @@ public:
 class ObjCSelectorExpr : public Expr {
   SourceLoc KeywordLoc;
   SourceLoc LParenLoc;
+  SourceLoc ModifierLoc;
   Expr *SubExpr;
   SourceLoc RParenLoc;
-  AbstractFunctionDecl *Method = nullptr;
+  AbstractFunctionDecl *ResolvedMethod = nullptr;
 
 public:
-  ObjCSelectorExpr(SourceLoc keywordLoc, SourceLoc lParenLoc,
-                   Expr *subExpr, SourceLoc rParenLoc)
+  /// The kind of #selector expression this is.
+  enum ObjCSelectorKind {
+    Method, Getter, Setter
+  };
+
+  ObjCSelectorExpr(ObjCSelectorKind kind, SourceLoc keywordLoc,
+                   SourceLoc lParenLoc, SourceLoc modifierLoc, Expr *subExpr,
+                   SourceLoc rParenLoc)
     : Expr(ExprKind::ObjCSelector, /*Implicit=*/false),
-      KeywordLoc(keywordLoc), LParenLoc(lParenLoc), SubExpr(subExpr),
-      RParenLoc(rParenLoc) { }
+      KeywordLoc(keywordLoc), LParenLoc(lParenLoc),
+      ModifierLoc(modifierLoc), SubExpr(subExpr), RParenLoc(rParenLoc) {
+    ObjCSelectorExprBits.SelectorKind = static_cast<unsigned>(kind);
+  }
 
   Expr *getSubExpr() const { return SubExpr; }
   void setSubExpr(Expr *expr) { SubExpr = expr; }
 
+  /// Whether this selector references a property getter or setter.
+  bool isPropertySelector() const {
+    switch (getSelectorKind()) {
+    case ObjCSelectorKind::Method:
+      return false;
+
+    case ObjCSelectorKind::Getter:
+    case ObjCSelectorKind::Setter:
+      return true;
+    }
+  }
+
+  /// Whether this selector references a method.
+  bool isMethodSelector() const {
+    switch (getSelectorKind()) {
+    case ObjCSelectorKind::Method:
+      return true;
+
+    case ObjCSelectorKind::Getter:
+    case ObjCSelectorKind::Setter:
+      return false;
+    }
+  }
+
   /// Retrieve the Objective-C method to which this expression refers.
-  AbstractFunctionDecl *getMethod() const { return Method; }
+  AbstractFunctionDecl *getMethod() const { return ResolvedMethod; }
 
   /// Set the Objective-C method to which this expression refers.
-  void setMethod(AbstractFunctionDecl *method) { Method = method; }
+  void setMethod(AbstractFunctionDecl *method) { ResolvedMethod = method; }
 
   SourceLoc getLoc() const { return KeywordLoc; }
   SourceRange getSourceRange() const {
     return SourceRange(KeywordLoc, RParenLoc);
+  }
+
+  /// The location at which the getter: or setter: starts. Requires the selector
+  /// to be a getter or setter.
+  SourceLoc getModifierLoc() const {
+    assert(isPropertySelector() && "Modifiers only set on property selectors");
+    return ModifierLoc;
+  }
+
+  /// Retrieve the kind of the selector (method, getter, setter)
+  ObjCSelectorKind getSelectorKind() const {
+    return static_cast<ObjCSelectorKind>(ObjCSelectorExprBits.SelectorKind);
+  }
+
+  /// Override the selector kind.
+  ///
+  /// Used by the type checker to recover from ill-formed #selector
+  /// expressions.
+  void overrideObjCSelectorKind(ObjCSelectorKind newKind,
+                                SourceLoc modifierLoc) {
+    ObjCSelectorExprBits.SelectorKind = static_cast<unsigned>(newKind);
+    ModifierLoc = modifierLoc;
   }
 
   static bool classof(const Expr *E) {

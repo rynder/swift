@@ -9,8 +9,8 @@ infix operator ~> { precedence 255 }
 
 func ~> <Target, Args, Result> (
   target: Target,
-  method: Target -> Args -> Result)
-  -> Args -> Result
+  method: (Target) -> (Args) -> Result)
+  -> (Args) -> Result
 {
   return method(target)
 }
@@ -25,8 +25,8 @@ struct Spoon: Runcible {
   typealias Element = Mince
 }
 
-func split<Seq: Runcible>(seq: Seq) -> (Seq.Element -> Bool) -> () {
-  return {(isSeparator: Seq.Element -> Bool) in
+func split<Seq: Runcible>(_ seq: Seq) -> ((Seq.Element) -> Bool) -> () {
+  return {(isSeparator: (Seq.Element) -> Bool) in
     return ()
   }
 }
@@ -43,7 +43,7 @@ var x = seq ~> split
 
 struct HugeStruct { var a, b, c, d: Int }
 struct S {
-  func hugeStructReturn(h: HugeStruct) -> HugeStruct { return h }
+  func hugeStructReturn(_ h: HugeStruct) -> HugeStruct { return h }
 }
 
 let s = S()
@@ -77,13 +77,13 @@ class Chicken : Protein {
   }
 }
 
-func healthyLunch<T: Protein>(t: T) -> () -> Protein? {
+func healthyLunch<T: Protein>(_ t: T) -> () -> Protein? {
   return T.veganOrNothing
 }
 
 let f = healthyLunch(Chicken())
 
-func dietaryFad<T: Protein>(t: T) -> () throws -> Protein {
+func dietaryFad<T: Protein>(_ t: T) -> () throws -> Protein {
   return T.paleoDiet
 }
 

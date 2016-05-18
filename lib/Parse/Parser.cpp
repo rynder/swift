@@ -600,7 +600,15 @@ bool Parser::parseAnyIdentifier(Identifier &Result, SourceLoc &Loc,
   }
 
   checkForInputIncomplete();
-  diagnose(Tok, D);
+
+  if (Tok.isKeyword()) {
+    diagnose(Tok, diag::keyword_cant_be_identifier, Tok.getText());
+    diagnose(Tok, diag::backticks_to_escape)
+      .fixItReplace(Tok.getLoc(), "`" + Tok.getText().str() + "`");
+  } else {
+    diagnose(Tok, D);
+  }
+
   return true;
 }
 
@@ -852,7 +860,10 @@ ParsedDeclName swift::parseDeclName(StringRef name) {
   // If this is not a function name, just parse the base name and
   // we're done.
   if (name.back() != ')') {
-    if (parseBaseName(name)) return ParsedDeclName();
+    if (Lexer::isOperator(name))
+      result.BaseName = name;
+    else if (parseBaseName(name))
+      return ParsedDeclName();
     return result;
   }
 
@@ -920,7 +931,9 @@ DeclName swift::formDeclName(ASTContext &ctx,
                              ArrayRef<StringRef> argumentLabels,
                              bool isFunctionName) {
   // We cannot import when the base name is not an identifier.
-  if (baseName.empty() || !Lexer::isIdentifier(baseName))
+  if (baseName.empty())
+    return DeclName();
+  if (!Lexer::isIdentifier(baseName) && !Lexer::isOperator(baseName))
     return DeclName();
 
   // Get the identifier for the base name.

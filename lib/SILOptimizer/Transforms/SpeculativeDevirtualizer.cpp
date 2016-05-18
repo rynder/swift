@@ -135,9 +135,10 @@ static FullApplySite speculateMonomorphicTarget(FullApplySite AI,
   if (auto *Release =
           dyn_cast<StrongReleaseInst>(std::next(Continue->begin()))) {
     if (Release->getOperand() == CMI->getOperand()) {
-      VirtBuilder.createStrongRelease(Release->getLoc(), CMI->getOperand());
-      IdenBuilder.createStrongRelease(Release->getLoc(),
-                                      DownCastedClassInstance);
+      VirtBuilder.createStrongRelease(Release->getLoc(), CMI->getOperand(),
+                                      Atomicity::Atomic);
+      IdenBuilder.createStrongRelease(
+          Release->getLoc(), DownCastedClassInstance, Atomicity::Atomic);
       Release->eraseFromParent();
     }
   }
@@ -153,12 +154,19 @@ static FullApplySite speculateMonomorphicTarget(FullApplySite AI,
   }
 
   // Remove the old Apply instruction.
-  if (!isa<TryApplyInst>(AI))
+  assert(AI.getInstruction() == &Continue->front() &&
+         "AI should be the first instruction in the split Continue block");
+  if (!isa<TryApplyInst>(AI)) {
     AI.getInstruction()->replaceAllUsesWith(Arg);
-  auto *OriginalBB = AI.getParent();
-  AI.getInstruction()->eraseFromParent();
-  if (OriginalBB->empty())
-    OriginalBB->removeFromParent();
+    AI.getInstruction()->eraseFromParent();
+    assert(!Continue->empty() &&
+           "There should be at least a terminator after AI");
+  } else {
+    AI.getInstruction()->eraseFromParent();
+    assert(Continue->empty() &&
+           "There should not be an instruction after try_apply");
+    Continue->eraseFromParent();
+  }
 
   // Update the stats.
   NumTargetsPredicted++;
@@ -401,6 +409,15 @@ static bool tryToSpeculateTarget(FullApplySite AI,
 
   // Try to devirtualize the static class of instance
   // if it is possible.
+  if (auto F = getTargetClassMethod(M, SubType, CMI)) {
+    // Do not devirtualize if a method in the base class is marked
+    // as non-optimizable. This way it is easy to disable the
+    // devirtualization of this method in the base class and
+    // any classes derived from it.
+    if (!F->shouldOptimize())
+      return false;
+  }
+
   auto FirstAI = speculateMonomorphicTarget(AI, SubType, LastCCBI);
   if (FirstAI) {
     Changed = true;
@@ -501,10 +518,11 @@ static bool tryToSpeculateTarget(FullApplySite AI,
     return true;
   }
   auto NewInstPair = tryDevirtualizeClassMethod(AI, SubTypeValue);
-  assert(NewInstPair.first && "Expected to be able to devirtualize apply!");
-  replaceDeadApply(AI, NewInstPair.first);
-
-  return true;
+  if (NewInstPair.first) {
+    replaceDeadApply(AI, NewInstPair.first);
+    return true;
+  }
+  return Changed;
 }
 
 namespace {

@@ -3,16 +3,20 @@ set(TRANSFORMS_SOURCES
   Transforms/ArrayCountPropagation.cpp
   Transforms/ArrayElementValuePropagation.cpp
   Transforms/CSE.cpp
+  Transforms/ConditionForwarding.cpp
   Transforms/CopyForwarding.cpp
   Transforms/DeadCodeElimination.cpp
   Transforms/DeadObjectElimination.cpp
   Transforms/DeadStoreElimination.cpp
   Transforms/Devirtualizer.cpp
+  Transforms/FunctionSignatureOpts.cpp
   Transforms/GenericSpecializer.cpp
   Transforms/MergeCondFail.cpp
+  Transforms/PerformanceInliner.cpp
   Transforms/RedundantLoadElimination.cpp
   Transforms/RedundantOverflowCheckRemoval.cpp
   Transforms/ReleaseDevirtualizer.cpp
+  Transforms/RetainReleaseCodeMotion.cpp
   Transforms/RemovePin.cpp
   Transforms/SILCleanup.cpp
   Transforms/SILCodeMotion.cpp
@@ -23,4 +27,5 @@ set(TRANSFORMS_SOURCES
   Transforms/Sink.cpp
   Transforms/SpeculativeDevirtualizer.cpp
   Transforms/StackPromotion.cpp
+  Transforms/UnsafeGuaranteedPeephole.cpp
   PARENT_SCOPE)

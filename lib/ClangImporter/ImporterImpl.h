@@ -261,9 +261,9 @@ public:
   ASTContext &SwiftContext;
 
   const bool ImportForwardDeclarations;
-  const bool OmitNeedlessWords;
-  const bool InferDefaultArguments;
-  const bool UseSwiftLookupTables;
+  const bool InferImportAsMember;
+  const bool DisableSwiftBridgeAttr;
+  const bool HonorSwiftNewtypeAttr;
 
   constexpr static const char * const moduleImportBufferName =
     "<swift-imported-modules>";
@@ -314,7 +314,10 @@ private:
 
 public:
   /// \brief Mapping of already-imported declarations.
-  llvm::DenseMap<const clang::Decl *, Decl *> ImportedDecls;
+  ///
+  /// The "char" in the key is a "bool" in disguise that indicates whether this
+  /// is a Swift 2 name vs. a Swift 3 name.
+  llvm::DenseMap<std::pair<const clang::Decl *, char>, Decl *> ImportedDecls;
 
   /// \brief The set of "special" typedef-name declarations, which are
   /// mapped to specific Swift types.
@@ -331,6 +334,11 @@ public:
   /// A mapping from module names to the prefixes placed on global names
   /// in that module, e.g., the Foundation module uses the "NS" prefix.
   llvm::StringMap<std::string> ModulePrefixes;
+
+  /// \brief Provide a single extension point for any given type per clang
+  /// submodule
+  llvm::DenseMap<std::pair<NominalTypeDecl *, const clang::Module *>,
+                 ExtensionDecl *> extensionPoints;
 
   /// Is the given identifier a reserved name in Swift?
   static bool isSwiftReservedName(StringRef name);
@@ -366,7 +374,7 @@ public:
 
   /// \brief Mapping of already-imported declarations from protocols, which
   /// can (and do) get replicated into classes.
-  llvm::DenseMap<std::pair<const clang::Decl *, DeclContext *>, Decl *>
+  llvm::DenseMap<std::tuple<const clang::Decl *, DeclContext *, char>, Decl *>
     ImportedProtocolDecls;
 
   /// Mapping from identifiers to the set of macros that have that name along
@@ -386,6 +394,11 @@ public:
 
   /// Whether we should suppress the import of the given Clang declaration.
   static bool shouldSuppressDeclImport(const clang::Decl *decl);
+
+  /// Whether we should suppress importing the Objective-C generic type params
+  /// of this class as Swift generic type params.
+  static bool shouldSuppressGenericParamsImport(
+      const clang::ObjCInterfaceDecl *decl);
 
   /// \brief Check if the declaration is one of the specially handled
   /// accessibility APIs.
@@ -464,6 +477,10 @@ public:
   /// \brief Keep track of subscript declarations based on getter/setter
   /// pairs.
   llvm::DenseMap<std::pair<FuncDecl *, FuncDecl *>, SubscriptDecl *> Subscripts;
+
+  /// Keeps track of the Clang functions that have been turned into
+  /// properties.
+  llvm::DenseMap<const clang::FunctionDecl *, VarDecl *> FunctionsAsProperties;
 
   /// Retrieve the key to use when looking for enum information.
   StringRef getEnumInfoKey(const clang::EnumDecl *decl,
@@ -551,7 +568,7 @@ public:
 
   /// \brief Keep track of initializer declarations that correspond to
   /// imported methods.
-  llvm::DenseMap<std::pair<const clang::ObjCMethodDecl *, DeclContext *>,
+  llvm::DenseMap<std::tuple<const clang::ObjCMethodDecl *, DeclContext *, char>,
                  ConstructorDecl *>
     Constructors;
 
@@ -683,6 +700,11 @@ public:
   void addMacrosToLookupTable(clang::ASTContext &clangCtx,
                               clang::Preprocessor &pp, SwiftLookupTable &table);
 
+  /// Finalize a lookup table, handling any as-yet-unresolved entries
+  /// and emitting diagnostics if necessary.
+  void finalizeLookupTable(clang::ASTContext &clangCtx,
+                           clang::Preprocessor &pp, SwiftLookupTable &table);
+
 public:
   void registerExternalDecl(Decl *D) {
     RegisteredExternalDecls.push_back(D);
@@ -766,6 +788,11 @@ public:
   static OmissionTypeName getClangTypeNameForOmission(clang::ASTContext &ctx,
                                                       clang::QualType type);
 
+  /// Whether NSUInteger can be imported as Int in certain contexts. If false,
+  /// should always be imported as UInt.
+  static bool shouldAllowNSUIntegerAsInt(bool isFromSystemModule,
+                                         const clang::NamedDecl *decl);
+
   /// Omit needless words in a function name.
   bool omitNeedlessWordsInFunctionName(
          clang::Sema &clangSema,
@@ -823,6 +850,9 @@ public:
     /// than refuse to import the initializer.
     bool DroppedVariadic = false;
 
+    /// Whether this is a global being imported as a member
+    bool ImportAsMember = false;
+
     /// What kind of accessor this name refers to, if any.
     ImportedAccessorKind AccessorKind = ImportedAccessorKind::None;
 
@@ -842,6 +872,10 @@ public:
     /// For names that map Objective-C error handling conventions into
     /// throwing Swift methods, describes how the mapping is performed.
     Optional<ImportedErrorInfo> ErrorInfo;
+
+    /// For a declaration name that makes the declaration into an
+    /// instance member, the index of the "Self" parameter.
+    Optional<unsigned> SelfIndex = None;
 
     /// Produce just the imported name, for clients that don't care
     /// about the details.
@@ -877,12 +911,18 @@ public:
         return true;
       }
     }
+
+    /// Print this imported name as a string suitable for the swift_name
+    /// attribute.
+    void printSwiftName(llvm::raw_ostream &os) const;
   };
 
   /// Flags that control the import of names in importFullName.
   enum class ImportNameFlags {
     /// Suppress the factory-method-as-initializer transformation.
     SuppressFactoryMethodAsInit = 0x01,
+    /// Produce the Swift 2 name of the given entity.
+    Swift2Name = 0x02,
   };
 
   /// Options that control the import of names in importFullName.
@@ -902,6 +942,11 @@ public:
   Identifier importMacroName(const clang::IdentifierInfo *clangIdentifier,
                              const clang::MacroInfo *macro,
                              clang::ASTContext &clangCtx);
+
+  /// Retrieve the property type as determined by the given accessor.
+  static clang::QualType
+  getAccessorPropertyType(const clang::FunctionDecl *accessor, bool isSetter,
+                          Optional<unsigned> selfIndex);
 
   /// \brief Import the given Clang identifier into Swift.
   ///
@@ -937,6 +982,11 @@ public:
   /// translated into Swift.
   ValueDecl *importMacro(Identifier name, clang::MacroInfo *macro);
 
+  /// Find the swift_newtype attribute on the given typedef, if present.
+  clang::SwiftNewtypeAttr *getSwiftNewtypeAttr(
+      const clang::TypedefNameDecl *decl,
+      bool useSwift2Name);
+
   /// Import attributes from the given Clang declaration to its Swift
   /// equivalent.
   ///
@@ -949,13 +999,15 @@ public:
 
   /// If we already imported a given decl, return the corresponding Swift decl.
   /// Otherwise, return nullptr.
-  Decl *importDeclCached(const clang::NamedDecl *ClangDecl);
+  Decl *importDeclCached(const clang::NamedDecl *ClangDecl, bool useSwift2Name);
 
   Decl *importDeclImpl(const clang::NamedDecl *ClangDecl,
+                       bool useSwift2Name,
                        bool &TypedefIsSuperfluous,
                        bool &HadForwardDeclaration);
 
   Decl *importDeclAndCacheImpl(const clang::NamedDecl *ClangDecl,
+                               bool useSwift2Name,
                                bool SuperfluousTypedefsAreTransparent);
 
   /// \brief Same as \c importDeclReal, but for use inside importer
@@ -964,8 +1016,8 @@ public:
   /// Unlike \c importDeclReal, this function for convenience transparently
   /// looks through superfluous typedefs and returns the imported underlying
   /// decl in that case.
-  Decl *importDecl(const clang::NamedDecl *ClangDecl) {
-    return importDeclAndCacheImpl(ClangDecl,
+  Decl *importDecl(const clang::NamedDecl *ClangDecl, bool useSwift2Name) {
+    return importDeclAndCacheImpl(ClangDecl, useSwift2Name,
                                   /*SuperfluousTypedefsAreTransparent=*/true);
   }
 
@@ -975,8 +1027,8 @@ public:
   ///
   /// \returns The imported declaration, or null if this declaration could
   /// not be represented in Swift.
-  Decl *importDeclReal(const clang::NamedDecl *ClangDecl) {
-    return importDeclAndCacheImpl(ClangDecl,
+  Decl *importDeclReal(const clang::NamedDecl *ClangDecl, bool useSwift2Name) {
+    return importDeclAndCacheImpl(ClangDecl, useSwift2Name,
                                   /*SuperfluousTypedefsAreTransparent=*/false);
   }
 
@@ -987,7 +1039,7 @@ public:
   /// \returns The imported declaration, or null if this declaration could not
   /// be represented in Swift.
   Decl *importMirroredDecl(const clang::NamedDecl *decl, DeclContext *dc,
-                           ProtocolDecl *proto);
+                           bool useSwift2Name, ProtocolDecl *proto);
 
   /// \brief Import the given Clang declaration context into Swift.
   ///
@@ -1006,13 +1058,6 @@ public:
   /// be converted.
   DeclContext *importDeclContextOf(const clang::Decl *D,
                                    EffectiveClangContext context);
-
-  /// \brief Import the declaration context of a given Clang
-  /// declaration into Swift.
-  DeclContext *importDeclContextOf(const clang::Decl *D) {
-    return importDeclContextOf(
-             D, const_cast<clang::DeclContext *>(D->getDeclContext()));
-  }
 
   /// \brief Create a new named constant with the given value.
   ///
@@ -1195,6 +1240,37 @@ public:
                           ParameterList *&parameterList,
                           DeclName &name);
 
+  /// \brief Import the given function return type.
+  ///
+  /// \param clangDecl The underlying declaration, if any; should only be
+  ///   considered for any attributes it might carry.
+  /// \param resultType The result type of the function.
+  /// \param allowNSUIntegerAsInt If true, NSUInteger will be imported as Int
+  ///        in certain contexts. If false, it will always be imported as UInt.
+  ///
+  /// \returns the imported function return type, or null if the type cannot be
+  /// imported.
+  Type importFunctionReturnType(const clang::FunctionDecl *clangDecl,
+                                clang::QualType resultType,
+                                bool allowNSUIntegerAsInt);
+
+  /// \brief Import the parameter list for a function
+  ///
+  /// \param clangDecl The underlying declaration, if any; should only be
+  ///   considered for any attributes it might carry.
+  /// \param params The parameter types to the function.
+  /// \param isVariadic Whether the function is variadic.
+  /// \param allowNSUIntegerAsInt If true, NSUInteger will be imported as Int
+  ///        in certain contexts. If false, it will always be imported as UInt.
+  /// \param argNames The argument names
+  ///
+  /// \returns The imported parameter list on success, or null on failure
+  ParameterList *
+  importFunctionParameterList(const clang::FunctionDecl *clangDecl,
+                              ArrayRef<const clang::ParmVarDecl *> params,
+                              bool isVariadic, bool allowNSUIntegerAsInt,
+                              ArrayRef<Identifier> argNames);
+
   Type importPropertyType(const clang::ObjCPropertyDecl *clangDecl,
                           bool isFromSystemModule);
 
@@ -1239,7 +1315,8 @@ public:
   ///
   /// \returns the imported function type, or null if the type cannot be
   /// imported.
-  Type importMethodType(const clang::ObjCMethodDecl *clangDecl,
+  Type importMethodType(const DeclContext *dc,
+                        const clang::ObjCMethodDecl *clangDecl,
                         clang::QualType resultType,
                         ArrayRef<const clang::ParmVarDecl *> params,
                         bool isVariadic, bool isNoReturn,
@@ -1350,6 +1427,15 @@ public:
   /// about the directly-parsed headers.
   SwiftLookupTable *findLookupTable(const clang::Module *clangModule);
 
+  /// Visit each of the lookup tables in some deterministic order.
+  ///
+  /// \param fn Invoke the given visitor for each table. If the
+  /// visitor returns true, stop early.
+  ///
+  /// \returns \c true if the \c visitor ever returns \c true, \c
+  /// false otherwise.
+  bool forEachLookupTable(llvm::function_ref<bool(SwiftLookupTable &table)> fn);
+
   /// Look for namespace-scope values with the given name in the given
   /// Swift lookup table.
   void lookupValue(SwiftLookupTable &table, DeclName name,
@@ -1368,8 +1454,31 @@ public:
   void lookupAllObjCMembers(SwiftLookupTable &table,
                             VisibleDeclConsumer &consumer);
 
+  /// Determine the effective Clang context for the given Swift nominal type.
+  EffectiveClangContext getEffectiveClangContext(NominalTypeDecl *nominal);
+
   /// Dump the Swift-specific name lookup tables we generate.
   void dumpSwiftLookupTables();
+
+  /// Whether the given decl is a global Notification
+  static bool isNSNotificationGlobal(const clang::NamedDecl *);
+
+  // If this decl is associated with a swift_newtype (and we're honoring
+  // swift_newtype), return it, otherwise null
+  clang::TypedefNameDecl *findSwiftNewtype(const clang::NamedDecl *decl,
+                                           clang::Sema &clangSema,
+                                           bool useSwift2Name);
+
+  /// Whether the passed type is NSString *
+  static bool isNSString(const clang::Type *);
+  static bool isNSString(clang::QualType);
+
+  /// Whether the given declaration was exported from Swift.
+  ///
+  /// Note that this only checks the immediate declaration being passed.
+  /// For things like methods and properties that are nested in larger types,
+  /// it's the top-level declaration that should be checked.
+  static bool hasNativeSwiftDecl(const clang::Decl *decl);
 };
 
 }

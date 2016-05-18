@@ -65,13 +65,13 @@ protocol CustomNameType2 {}
   func test()
   static func test2()
 
-  func testRawAnyTypes(any: AnyObject, other: AnyObject.Type)
+  func testRawAnyTypes(_ any: AnyObject, other: AnyObject.Type)
 
-  func testSingleProtocolTypes(a : A, aAgain a2: protocol<A>, b: B, bAgain b2: protocol<B>, both: protocol<A, B>)
-  func testSingleProtocolClassTypes(a : A.Type, aAgain a2: protocol<A>.Type, b: B.Type, bAgain b2: protocol<B>.Type, both: protocol<A, B>.Type)
-  func testComposition(x: protocol<A, ZZZ>, meta xClass: protocol<A, ZZZ>.Type)
+  func testSingleProtocolTypes(_ a : A, aAgain a2: protocol<A>, b: B, bAgain b2: protocol<B>, both: protocol<A, B>)
+  func testSingleProtocolClassTypes(_ a : A.Type, aAgain a2: protocol<A>.Type, b: B.Type, bAgain b2: protocol<B>.Type, both: protocol<A, B>.Type)
+  func testComposition(_ x: protocol<A, ZZZ>, meta xClass: protocol<A, ZZZ>.Type)
 
-  func testOptional(opt: A?, meta m: A.Type?)
+  func testOptional(_ opt: A?, meta m: A.Type?)
 }
 
 // CHECK-LABEL: @interface MyObject : NSObject <NSCoding>
@@ -110,12 +110,12 @@ extension NSString : A, ZZZ {}
   func a()
   func b()
 
-  optional func c()
-  optional func d()
+  @objc optional func c()
+  @objc optional func d()
 
   func e()
 
-  optional func f()
+  @objc optional func f()
 }
 
 // NEGATIVE-NOT: @protocol PrivateProto
@@ -140,7 +140,7 @@ extension NSString : A, ZZZ {}
 @objc protocol Properties {
   var a: Int { get }
   var b: Properties? { get set }
-  optional var c: String { get }
+  @objc optional var c: String { get }
 }
 
 

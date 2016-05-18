@@ -231,6 +231,13 @@ static bool canHoistInstruction(SILInstruction *Inst, SILLoop *Loop,
   if (isa<AllocationInst>(Inst) || isa<DeallocStackInst>(Inst))
     return false;
 
+  // Can't hoist metatype instruction referring to an opened existential,
+  // because it may break the dominance relationship.
+  if (isa<MetatypeInst>(Inst) &&
+      Inst->getType().getSwiftRValueType()->hasOpenedExistential()) {
+    return false;
+  }
+
   // Can't hoist instructions which may have side effects.
   if (!hasNoSideEffect(Inst, SafeReads))
     return false;
@@ -287,7 +294,7 @@ static bool hoistInstructions(SILLoop *Loop, DominanceInfo *DT,
         DEBUG(llvm::dbgs() << "   hoisting to preheader.\n");
         Changed = true;
         Inst->moveBefore(Preheader->getTerminator());
-      } else if (RunsOnHighLevelSil){
+      } else if (RunsOnHighLevelSil) {
         ArraySemanticsCall semCall(Inst);
         switch (semCall.getKind()) {
         case ArrayCallKind::kGetCount:

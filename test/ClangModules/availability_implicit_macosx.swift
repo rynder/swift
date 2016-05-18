@@ -33,7 +33,7 @@ func directUseShouldStillTriggerDeprecationWarning() {
   _ = NSDeprecatedEnum.first    // expected-warning {{'NSDeprecatedEnum' was deprecated in OS X 10.51: Use a different API}}
 }
 
-func useInSignature(options: NSDeprecatedOptions) { // expected-warning {{'NSDeprecatedOptions' was deprecated in OS X 10.51: Use a different API}}
+func useInSignature(_ options: NSDeprecatedOptions) { // expected-warning {{'NSDeprecatedOptions' was deprecated in OS X 10.51: Use a different API}}
 }
 
 class SuperClassWithDeprecatedInitializer {
@@ -99,7 +99,7 @@ class ClassWithReferencesLazyInitializers {
 func unavailableUseInUnavailableFunction() {
   // Diagnose references to unavailable functions in non-implicit code
   // as errors
-  unavailableFunction() // expected-error {{'unavailableFunction()' is unavailable}}
+  unavailableFunction() // expected-error {{'unavailableFunction()' is unavailable}} expected-warning {{result of call to 'unavailableFunction()' is unused}}
 }
 
 

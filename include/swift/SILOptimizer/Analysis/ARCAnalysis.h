@@ -47,8 +47,10 @@ bool mayDecrementRefCount(SILInstruction *User, SILValue Ptr,
 bool mayCheckRefCount(SILInstruction *User);
 
 /// \returns True if the \p User might use the pointer \p Ptr in a manner that
-/// requires \p Ptr to be alive before Inst.
-bool mayUseValue(SILInstruction *User, SILValue Ptr, AliasAnalysis *AA);
+/// requires \p Ptr to be alive before Inst or the release of Ptr may use memory
+/// accessed by \p User.
+bool mayHaveSymmetricInterference(SILInstruction *User, SILValue Ptr,
+                                 AliasAnalysis *AA);
 
 /// \returns True if the \p User must use the pointer \p Ptr in a manner that
 /// requires \p Ptr to be alive before Inst.
@@ -134,6 +136,12 @@ private:
   // and handle exploded retain_value later.
   RetainList EpilogueRetainInsts;
 
+  /// Return true if all the successors of the EpilogueRetainInsts do not have
+  /// a retain. 
+  bool isTransitiveSuccessorsRetainFree(llvm::DenseSet<SILBasicBlock *> BBs);
+
+  /// Finds matching releases in the provided block \p BB.
+  RetainKindValue findMatchingRetainsInBasicBlock(SILBasicBlock *BB, SILValue V);
 public:
   /// Finds matching releases in the return block of the function \p F.
   ConsumedResultToEpilogueRetainMatcher(RCIdentityFunctionInfo *RCFI,
@@ -165,11 +173,6 @@ public:
   unsigned size() const { return EpilogueRetainInsts.size(); }
 
   iterator_range<iterator> getRange() { return swift::make_range(begin(), end()); }
-
-
-private:
-  /// Finds matching releases in the provided block \p BB.
-  RetainKindValue findMatchingRetainsInner(SILBasicBlock *BB, SILValue V);
 };
 
 /// A class that attempts to match owned arguments and corresponding epilogue
@@ -185,7 +188,9 @@ private:
   RCIdentityFunctionInfo *RCFI;
   ExitKind Kind;
   llvm::SmallMapVector<SILArgument *, ReleaseList, 8> ArgInstMap;
-  bool HasBlock = false;
+
+  /// Eventually this will be used in place of HasBlock.
+  SILBasicBlock *ProcessedBlock;
 
   /// Return true if we have seen releases to part or all of \p Derived in
   /// \p Insts.
@@ -197,8 +202,17 @@ private:
   bool isRedundantRelease(ReleaseList Insts, SILValue Base, SILValue Derived);
 
   /// Return true if we have a release instruction for all the reference
-  /// semantics part of \p Base.
-  bool releaseAllNonTrivials(ReleaseList Insts, SILValue Base);
+  /// semantics part of \p Argument.
+  bool releaseArgument(ReleaseList Insts, SILValue Argument);
+
+  /// Walk the basic block and find all the releases that match to function
+  /// arguments. 
+  void collectMatchingReleases(SILBasicBlock *BB);
+
+  /// For every argument in the function, check to see whether all epilogue
+  /// releases are found. Clear all releases for the argument if not all 
+  /// epilogue releases are found.
+  void processMatchingReleases();
 
 public:
   /// Finds matching releases in the return block of the function \p F.
@@ -209,13 +223,34 @@ public:
   /// Finds matching releases in the provided block \p BB.
   void findMatchingReleases(SILBasicBlock *BB);
 
-  bool hasBlock() const { return HasBlock; }
+  bool hasBlock() const { return ProcessedBlock != nullptr; }
+
+  bool isEpilogueRelease(SILInstruction *I) const {
+    // This is not a release instruction in the epilogue block.
+    if (I->getParent() != ProcessedBlock)
+      return false;
+    for (auto &X : ArgInstMap) {
+      // Either did not find epilogue release or found exploded epilogue
+      // releases.
+      if (X.second.size() != 1)
+        continue;
+      if (*X.second.begin() == I) 
+        return true;
+    }
+    return false;
+  }
+
+  bool isSingleRelease(SILArgument *Arg) const {
+    auto Iter = ArgInstMap.find(Arg);
+    assert(Iter != ArgInstMap.end() && "Failed to get release list for argument");
+    return Iter->second.size() == 1;
+  }
 
   SILInstruction *getSingleReleaseForArgument(SILArgument *Arg) {
     auto I = ArgInstMap.find(Arg);
     if (I == ArgInstMap.end())
       return nullptr;
-    if (I->second.size() > 1)
+    if (!isSingleRelease(Arg))
       return nullptr;
     return *I->second.begin();
   }
@@ -309,6 +344,36 @@ bool getFinalReleasesForValue(SILValue Value, ReleaseTracker &Tracker);
 
 /// Match a call to a trap BB with no ARC relevant side effects.
 bool isARCInertTrapBB(const SILBasicBlock *BB);
+
+/// Get the two result values of the builtin "unsafeGuaranteed" instruction.
+///
+/// Gets the (GuaranteedValue, Token) tuple from a call to "unsafeGuaranteed"
+/// if the tuple elements are identified by a single tuple_extract use.
+/// Otherwise, returns a (nullptr, nullptr) tuple.
+std::pair<SILInstruction *, SILInstruction *>
+getSingleUnsafeGuaranteedValueResult(BuiltinInst *UnsafeGuaranteedInst);
+
+/// Get the single builtin "unsafeGuaranteedEnd" user of a builtin
+/// "unsafeGuaranteed"'s token.
+BuiltinInst *getUnsafeGuaranteedEndUser(SILInstruction *UnsafeGuaranteedToken);
+
+/// Walk backwards from an unsafeGuaranteedEnd builtin instruction looking for a
+/// release on the reference returned by the matching unsafeGuaranteed builtin
+/// ignoring releases on the way.
+/// Return nullptr if no release is found.
+///
+///    %4 = builtin "unsafeGuaranteed"<Foo>(%0 : $Foo) : $(Foo, Builtin.Int8)
+///    %5 = tuple_extract %4 : $(Foo, Builtin.Int8), 0
+///    %6 = tuple_extract %4 : $(Foo, Builtin.Int8), 1
+///    strong_release %5 : $Foo // <-- Matching release.
+///    strong_release %6 : $Foo // Ignore.
+///    %12 = builtin "unsafeGuaranteedEnd"(%6 : $Builtin.Int8) : $()
+///
+/// Alternatively, look for the release after the unsafeGuaranteedEnd.
+SILInstruction *findReleaseToMatchUnsafeGuaranteedValue(
+    SILInstruction *UnsafeGuaranteedEndI, SILInstruction *UnsafeGuaranteedI,
+    SILValue UnsafeGuaranteedValue, SILBasicBlock &BB,
+    RCIdentityFunctionInfo &RCFI);
 
 } // end namespace swift
 

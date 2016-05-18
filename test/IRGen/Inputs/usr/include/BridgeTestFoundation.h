@@ -7,19 +7,19 @@
 @interface NSMutableString : NSString
 @end
 
-@interface NSArray : NSObject
+@interface NSArray<ObjectType> : NSObject
 @end
 
-@interface NSMutableArray : NSObject
+@interface NSMutableArray<ObjectType> : NSArray<ObjectType>
 @end
 
-@interface NSDictionary : NSObject
+@interface NSDictionary<KeyType, ValueType> : NSObject
 @end
 
-@interface NSSet : NSObject
+@interface NSSet<ObjectType> : NSObject
 @end
 
-@interface NSMutableSet : NSObject
+@interface NSMutableSet<ObjectType> : NSSet<ObjectType>
 @end
 
 @interface NSNumber : NSObject
@@ -59,3 +59,6 @@ extern int weak_variable __attribute__((weak_import));
 @property NSDictionary *userInfo;
 
 @end
+
+typedef NSString *__nonnull NSNotificationName
+    __attribute((swift_newtype(struct)));

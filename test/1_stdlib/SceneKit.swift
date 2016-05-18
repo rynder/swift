@@ -6,13 +6,6 @@
 
 import StdlibUnittest
 
-// Also import modules which are used by StdlibUnittest internally. This
-// workaround is needed to link all required libraries in case we compile
-// StdlibUnittest with -sil-serialize-all.
-import SwiftPrivate
-#if _runtime(_ObjC)
-import ObjectiveC
-#endif
 
 import SceneKit
 
@@ -38,7 +31,7 @@ if #available(iOS 8.0, OSX 10.10, *) {
     expectEqual(scn_float_from_d, 2.0)
 
     let cg = CGFloat(3.0)
-    let scn_float_from_cg = SCNFloat(cg)
+    let scn_float_from_cg = SCNFloat(cg as NSNumber)
     expectEqual(scn_float_from_cg, 3.0)
 
     let node = SCNNode()

@@ -155,18 +155,11 @@ ProtocolDecl *TypeChecker::getLiteralProtocol(Expr *expr) {
   }
 
   if (auto E = dyn_cast<ObjectLiteralExpr>(expr)) {
-    Identifier name = E->getName();
-    if (name.str().equals("Color")) {
-      return getProtocol(expr->getLoc(),
-                         KnownProtocolKind::ColorLiteralConvertible);
-    } else if (name.str().equals("Image")) {
-      return getProtocol(expr->getLoc(),
-                         KnownProtocolKind::ImageLiteralConvertible);
-    } else if (name.str().equals("FileReference")) {
-      return getProtocol(expr->getLoc(),
-                         KnownProtocolKind::FileReferenceLiteralConvertible);
-    } else {
-      return nullptr;
+    switch (E->getLiteralKind()) {
+#define POUND_OBJECT_LITERAL(Name, Desc, Protocol)\
+    case ObjectLiteralExpr::Name:\
+      return getProtocol(expr->getLoc(), KnownProtocolKind::Protocol);
+#include "swift/Parse/Tokens.def"
     }
   }
 
@@ -174,22 +167,59 @@ ProtocolDecl *TypeChecker::getLiteralProtocol(Expr *expr) {
 }
 
 DeclName TypeChecker::getObjectLiteralConstructorName(ObjectLiteralExpr *expr) {
-  Identifier name = expr->getName();
-  if (name.str().equals("Color")) {
+  switch (expr->getLiteralKind()) {
+  case ObjectLiteralExpr::colorLiteral: {
     return DeclName(Context, Context.Id_init,
                     { Context.getIdentifier("colorLiteralRed"),
                       Context.getIdentifier("green"),
                       Context.getIdentifier("blue"),
                       Context.getIdentifier("alpha") });
-  } else if (name.str().equals("Image")) {
-    return DeclName(Context, Context.Id_init,
-                    { Context.getIdentifier("imageLiteral") });
-  } else if (name.str().equals("FileReference")) {
-    return DeclName(Context, Context.Id_init,
-                    { Context.getIdentifier("fileReferenceLiteral") });
-  } else {
-    return DeclName();
   }
+  case ObjectLiteralExpr::imageLiteral: {
+    return DeclName(Context, Context.Id_init,
+                    { Context.getIdentifier("imageLiteralResourceName") });
+  }
+  case ObjectLiteralExpr::fileLiteral: {
+    return DeclName(Context, Context.Id_init,
+            { Context.getIdentifier("fileReferenceLiteralResourceName") });
+  }
+  }
+  llvm_unreachable("unknown literal constructor");
+}
+
+/// Return an idealized form of the parameter type of the given
+/// object-literal initializer.  This removes references to the protocol
+/// name from the first argument label, which would be otherwise be
+/// redundant when writing out the object-literal syntax:
+///
+///   #fileLiteral(fileReferenceLiteralResourceName: "hello.jpg")
+///
+/// Doing this allows us to preserve a nicer (and source-compatible)
+/// literal syntax while still giving the initializer a semantically
+/// unambiguous name.
+Type TypeChecker::getObjectLiteralParameterType(ObjectLiteralExpr *expr,
+                                                ConstructorDecl *ctor) {
+  Type argType = ctor->getArgumentType();
+  auto argTuple = argType->getAs<TupleType>();
+  if (!argTuple) return argType;
+
+  auto replace = [&](StringRef replacement) -> Type {
+    SmallVector<TupleTypeElt, 4> elements;
+    elements.append(argTuple->getElements().begin(),
+                    argTuple->getElements().end());
+    elements[0] = TupleTypeElt(elements[0].getType(),
+                               Context.getIdentifier(replacement));
+    return TupleType::get(elements, Context);
+  };
+
+  switch (expr->getLiteralKind()) {
+  case ObjectLiteralExpr::colorLiteral:
+    return replace("red");
+  case ObjectLiteralExpr::fileLiteral:
+  case ObjectLiteralExpr::imageLiteral:
+    return replace("resourceName");
+  }
+  llvm_unreachable("unknown literal constructor");
 }
 
 Module *TypeChecker::getStdlibModule(const DeclContext *dc) {
@@ -473,7 +503,7 @@ static void typeCheckFunctionsAndExternalDecls(TypeChecker &TC) {
            currentExternalDef < TC.Context.ExternalDefinitions.size() ||
            !TC.UsedConformances.empty());
 
-  // FIXME: Horrible hack. Store this somewhere more sane.
+  // FIXME: Horrible hack. Store this somewhere more appropriate.
   TC.Context.LastCheckedExternalDefinition = currentExternalDef;
 
   // Compute captures for functions and closures we visited.
@@ -506,7 +536,8 @@ void swift::typeCheckExternalDefinitions(SourceFile &SF) {
 
 void swift::performTypeChecking(SourceFile &SF, TopLevelContext &TLC,
                                 OptionSet<TypeCheckingFlags> Options,
-                                unsigned StartElem) {
+                                unsigned StartElem,
+                                unsigned WarnLongFunctionBodies) {
   if (SF.ASTStage == SourceFile::TypeChecked)
     return;
 
@@ -524,6 +555,7 @@ void swift::performTypeChecking(SourceFile &SF, TopLevelContext &TLC,
     TypeChecker TC(Ctx);
     SharedTimer timer("Type checking / Semantic analysis");
 
+    TC.setWarnLongFunctionBodies(WarnLongFunctionBodies);
     if (Options.contains(TypeCheckingFlags::DebugTimeFunctionBodies))
       TC.enableDebugTimeFunctionBodies();
 
@@ -1346,7 +1378,7 @@ private:
 
       // FIXME: This is not quite right: we want to handle AppExtensions
       // properly. For example, on the OSXApplicationExtension platform
-      // we want to chose the OSX spec unless there is an explicit
+      // we want to chose the OS X spec unless there is an explicit
       // OSXApplicationExtension spec.
       if (isPlatformActive(VersionSpec->getPlatform(), TC.getLangOpts())) {
         return VersionSpec;
@@ -2208,7 +2240,7 @@ static bool someEnclosingDeclMatches(SourceRange ReferenceRange,
 
 bool TypeChecker::isInsideImplicitFunction(SourceRange ReferenceRange,
                                            const DeclContext *DC) {
-  std::function<bool(const Decl *)> IsInsideImplicitFunc = [](const Decl *D) {
+  auto IsInsideImplicitFunc = [](const Decl *D) {
     auto *AFD = dyn_cast<AbstractFunctionDecl>(D);
     return AFD && AFD->isImplicit();
   };
@@ -2220,7 +2252,7 @@ bool TypeChecker::isInsideImplicitFunction(SourceRange ReferenceRange,
 
 bool TypeChecker::isInsideUnavailableDeclaration(
     SourceRange ReferenceRange, const DeclContext *ReferenceDC) {
-  std::function<bool(const Decl *)> IsUnavailable = [](const Decl *D) {
+  auto IsUnavailable = [](const Decl *D) {
     return D->getAttrs().getUnavailable(D->getASTContext());
   };
 
@@ -2228,78 +2260,14 @@ bool TypeChecker::isInsideUnavailableDeclaration(
                                   IsUnavailable);
 }
 
-/// Returns true if the reference is lexically contained in a declaration
-/// that is deprecated on all deployment targets.
-static bool isInsideDeprecatedDeclaration(SourceRange ReferenceRange,
-                                          const DeclContext *ReferenceDC,
-                                          TypeChecker &TC) {
+bool TypeChecker::isInsideDeprecatedDeclaration(SourceRange ReferenceRange,
+                                                const DeclContext *ReferenceDC){
   std::function<bool(const Decl *)> IsDeprecated = [](const Decl *D) {
     return D->getAttrs().getDeprecated(D->getASTContext());
   };
 
-  return someEnclosingDeclMatches(ReferenceRange, ReferenceDC, TC,
+  return someEnclosingDeclMatches(ReferenceRange, ReferenceDC, *this,
                                   IsDeprecated);
-}
-
-void TypeChecker::diagnoseDeprecated(SourceRange ReferenceRange,
-                                     const DeclContext *ReferenceDC,
-                                     const AvailableAttr *Attr,
-                                     DeclName Name,
-                   std::function<void(InFlightDiagnostic&)> extraInfoHandler) {
-  // We match the behavior of clang to not report deprecation warnings
-  // inside declarations that are themselves deprecated on all deployment
-  // targets.
-  if (isInsideDeprecatedDeclaration(ReferenceRange, ReferenceDC, *this)) {
-    return;
-  }
-
-  if (!Context.LangOpts.DisableAvailabilityChecking) {
-    AvailabilityContext RunningOSVersions =
-        overApproximateAvailabilityAtLocation(ReferenceRange.Start,ReferenceDC);
-    if (RunningOSVersions.isKnownUnreachable()) {
-      // Suppress a deprecation warning if the availability checking machinery
-      // thinks the reference program location will not execute on any
-      // deployment target for the current platform.
-      return;
-    }
-  }
-
-  StringRef Platform = Attr->prettyPlatformString();
-  clang::VersionTuple DeprecatedVersion;
-  if (Attr->Deprecated)
-    DeprecatedVersion = Attr->Deprecated.getValue();
-
-  if (Attr->Message.empty() && Attr->Rename.empty()) {
-    auto diagValue = std::move(
-      diagnose(ReferenceRange.Start, diag::availability_deprecated, Name,
-               Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
-               DeprecatedVersion)
-        .highlight(Attr->getRange()));
-    extraInfoHandler(diagValue);
-    return;
-  }
-
-  if (Attr->Message.empty()) {
-    auto diagValue = std::move(
-      diagnose(ReferenceRange.Start, diag::availability_deprecated_rename, Name,
-               Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
-               DeprecatedVersion, Attr->Rename)
-        .highlight(Attr->getRange()));
-    extraInfoHandler(diagValue);
-  } else {
-    EncodedDiagnosticMessage EncodedMessage(Attr->Message);
-    auto diagValue = std::move(
-      diagnose(ReferenceRange.Start, diag::availability_deprecated_msg, Name,
-               Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
-               DeprecatedVersion, EncodedMessage.Message)
-        .highlight(Attr->getRange()));
-    extraInfoHandler(diagValue);
-  }
-
-  if (!Attr->Rename.empty()) {
-    diagnose(ReferenceRange.Start, diag::note_deprecated_rename, Attr->Rename)
-      .fixItReplace(ReferenceRange, Attr->Rename);
-  }
 }
 
 // checkForForbiddenPrefix is for testing purposes.

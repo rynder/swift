@@ -160,6 +160,9 @@ namespace {
         if (auto assocType = dyn_cast<AssociatedTypeDecl>(found)) {
           witness = conformance->getTypeWitnessSubstAndDecl(assocType, &TC)
             .second;
+        } else if (isa<TypeAliasDecl>(found)) {
+          // No witness for typealiases.
+          return;
         } else {
           witness = conformance->getWitness(found, &TC).getDecl();
         }
@@ -234,7 +237,7 @@ LookupResult TypeChecker::lookupMember(DeclContext *dc,
                                        Type type, DeclName name,
                                        NameLookupOptions options) {
   LookupResult result;
-  unsigned subOptions = NL_QualifiedDefault;
+  NLOptions subOptions = NL_QualifiedDefault;
   if (options.contains(NameLookupFlags::KnownPrivate))
     subOptions |= NL_KnownNonCascadingDependency;
   if (options.contains(NameLookupFlags::DynamicLookup))
@@ -323,7 +326,7 @@ LookupTypeResult TypeChecker::lookupMemberType(DeclContext *dc,
          
   // Look for members with the given name.
   SmallVector<ValueDecl *, 4> decls;
-  unsigned subOptions = NL_QualifiedDefault;
+  NLOptions subOptions = NL_QualifiedDefault;
   if (options.contains(NameLookupFlags::KnownPrivate))
     subOptions |= NL_KnownNonCascadingDependency;
   if (options.contains(NameLookupFlags::ProtocolMembers))
@@ -356,6 +359,13 @@ LookupTypeResult TypeChecker::lookupMemberType(DeclContext *dc,
         inferredAssociatedTypes.push_back(assocType);
         continue;
       }
+    }
+
+    // Ignore typealiases found in protocol members.
+    if (auto alias = dyn_cast<TypeAliasDecl>(typeDecl)) {
+      auto aliasParent = alias->getParent();
+      if (aliasParent != dc && isa<ProtocolDecl>(aliasParent))
+        continue;
     }
 
     // Substitute the base into the member's type.
